@@ -1,19 +1,29 @@
 package com.ts.messenger.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -26,30 +36,52 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.ts.messenger.R
 
-/** Scrollable, keyboard-aware, notch-aware page used by every screen. */
+private val FieldShape = RoundedCornerShape(12.dp)
+
+/** Centered, keyboard-aware, notch-aware page used by sign-in style screens. */
 @Composable
 fun Page(title: String, content: @Composable () -> Unit) {
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(
             modifier = Modifier
                 .safeDrawingPadding()
                 .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 16.dp),
+                .padding(horizontal = 24.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("TS", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.primary)
-            Text(title, style = MaterialTheme.typography.headlineSmall)
-            content()
+            Spacer(Modifier.height(16.dp))
+            Box(
+                modifier = Modifier.size(84.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("TS", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            }
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                content()
+            }
         }
     }
 }
@@ -66,18 +98,23 @@ fun PrimaryButton(text: String, busy: Boolean, enabled: Boolean = true, onClick:
     Button(
         onClick = onClick,
         enabled = enabled && !busy,
+        shape = FieldShape,
         modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), // comfortable touch target
     ) {
         if (busy) {
-            CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp).heightIn(max = 20.dp), strokeWidth = 2.dp)
+            CircularProgressIndicator(
+                modifier = Modifier.padding(end = 12.dp).size(18.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onPrimary,
+            )
         }
-        Text(text)
+        Text(text, fontWeight = FontWeight.Medium)
     }
 }
 
 @Composable
 fun LinkButton(text: String, onClick: () -> Unit) {
-    TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp)) { Text(text) }
+    TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(text) }
 }
 
 /**
@@ -98,6 +135,7 @@ fun SecretField(
         onValueChange = onValueChange,
         label = { Text(label) },
         singleLine = true,
+        shape = FieldShape,
         modifier = modifier.fillMaxWidth(),
         visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(
@@ -127,6 +165,7 @@ fun PlainField(
         onValueChange = onValueChange,
         label = { Text(label) },
         singleLine = true,
+        shape = FieldShape,
         modifier = modifier.fillMaxWidth(),
         keyboardOptions = KeyboardOptions(
             capitalization = KeyboardCapitalization.None,
@@ -141,5 +180,49 @@ fun PlainField(
 fun ButtonRow(content: @Composable () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         content()
+    }
+}
+
+// ── Messenger building blocks ──
+
+private val AvatarPalette = listOf(
+    Color(0xFFE17076), Color(0xFFEDA86C), Color(0xFFA695E7), Color(0xFF7BC862),
+    Color(0xFF6EC9CB), Color(0xFF65AADD), Color(0xFFEE7AAE),
+)
+
+/** Round avatar with the first letter; the colour is stable per [seed]. */
+@Composable
+fun Avatar(name: String, seed: String, size: Dp = 52.dp) {
+    val color = AvatarPalette[(seed.hashCode() and Int.MAX_VALUE) % AvatarPalette.size]
+    val letter = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+    Box(
+        modifier = Modifier.size(size).clip(CircleShape).background(color),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(letter, color = Color.White, fontSize = (size.value * 0.42f).sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** 48dp round tap target holding one icon. */
+@Composable
+fun IconBtn(kind: IconKind, tint: Color, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier.size(48.dp).clip(CircleShape).clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        TsIcon(kind, if (enabled) tint else tint.copy(alpha = 0.38f))
+    }
+}
+
+/** Top app bar: 60dp row on the surface colour with a hairline under it. */
+@Composable
+fun TopBar(content: @Composable RowScope.() -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            content = content,
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
