@@ -50,3 +50,6 @@ CLAUDE.md
 
 # Pi agent config (local)
 .pi/
+
+# Local scratch files that may hold secrets
+pas.txt
