@@ -2,7 +2,12 @@ package com.ts.messenger
 
 import android.os.Bundle
 import android.view.WindowManager
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -19,6 +24,21 @@ class MainActivity : FragmentActivity() {
     private val vm: AppViewModel by viewModels()
     private var unlockFailed by mutableStateOf(false)
 
+    // Android 13+ asks for notification permission at runtime. Either answer continues: without
+    // the permission the push is registered but nothing is displayed.
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { vm.enablePush() }
+
+    private fun enablePush() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            vm.enablePush()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // No screenshots, no screen recording, and a blank thumbnail in the recent-apps list.
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
@@ -31,7 +51,7 @@ class MainActivity : FragmentActivity() {
                 val state by vm.state.collectAsState()
                 val lockAvailable = remember { AppLock.isAvailable(this) }
                 if (state.unlocked) {
-                    AppContent(state, vm)
+                    AppContent(state, vm, ::enablePush)
                 } else {
                     LockScreen(noLockSet = !lockAvailable, failed = unlockFailed, onUnlock = ::promptUnlock)
                 }

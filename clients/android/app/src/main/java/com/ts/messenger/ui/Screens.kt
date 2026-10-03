@@ -166,6 +166,7 @@ fun HomeScreen(state: UiState, onSignOut: () -> Unit) {
 fun AppContent(
     state: UiState,
     vm: com.ts.messenger.AppViewModel,
+    onEnablePush: () -> Unit,
 ) {
     when (val s = state.screen) {
         Screen.Connect -> ConnectScreen(state, vm::connect)
@@ -173,7 +174,7 @@ fun AppContent(
         Screen.Login -> LoginScreen(state, vm::login, { vm.goTo(Screen.Register) }, vm::changeServer)
         Screen.Register -> RegisterScreen(state, vm::register, { vm.goTo(Screen.Login) })
         is Screen.Recovery -> RecoveryScreen(s.code, vm::recoverySaved)
-        Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice)
+        Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice, onEnablePush, vm::disablePush)
         Screen.NewChat -> NewChatScreen(state, vm::search, vm::startChatWith, vm::leaveNewChat)
         Screen.Chat -> ChatScreen(state, vm::closeChat, vm::sendMessage)
     }

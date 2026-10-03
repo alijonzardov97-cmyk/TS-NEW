@@ -52,6 +52,8 @@ fun ConversationListScreen(
     onNew: () -> Unit,
     onSignOut: () -> Unit,
     onDismissNotice: () -> Unit,
+    onEnablePush: () -> Unit,
+    onDisablePush: () -> Unit,
 ) {
     Page(stringResource(R.string.home_title)) {
         state.user?.let { Text(it.displayName, style = MaterialTheme.typography.titleMedium) }
@@ -75,6 +77,25 @@ fun ConversationListScreen(
                 Column(modifier = Modifier.padding(16.dp).heightIn(min = 40.dp)) {
                     Text(dm.otherUser.displayName, style = MaterialTheme.typography.titleMedium)
                     Text("@${dm.otherUser.username}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.push_title), style = MaterialTheme.typography.titleMedium)
+                when (state.push) {
+                    com.ts.messenger.PushStatus.On -> {
+                        Text(stringResource(R.string.push_on), style = MaterialTheme.typography.bodyMedium)
+                        TextButton(onClick = onDisablePush) { Text(stringResource(R.string.push_disable)) }
+                    }
+                    com.ts.messenger.PushStatus.NoDistributor ->
+                        Text(stringResource(R.string.push_no_distributor), style = MaterialTheme.typography.bodyMedium)
+                    com.ts.messenger.PushStatus.ServerUnsupported ->
+                        Text(stringResource(R.string.push_server_unsupported), style = MaterialTheme.typography.bodyMedium)
+                    com.ts.messenger.PushStatus.Off -> {
+                        Text(stringResource(R.string.push_off), style = MaterialTheme.typography.bodyMedium)
+                        TextButton(onClick = onEnablePush) { Text(stringResource(R.string.push_enable)) }
+                    }
                 }
             }
         }

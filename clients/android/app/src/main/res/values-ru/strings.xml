@@ -81,4 +81,13 @@
     <string name="identity_changed_body">Ключ безопасности собеседника отличается от сохранённого. Возможно, у него новое устройство, но так же может выглядеть и перехват переписки. Сверьте код безопасности лично или по надёжному звонку, прежде чем продолжать.</string>
     <string name="identity_changed_accept">Доверять новому ключу</string>
     <string name="identity_changed_reject">Не сейчас</string>
+    <string name="notif_channel_name">Сообщения</string>
+    <string name="notif_new_message">Новое сообщение</string>
+    <string name="push_title">Уведомления</string>
+    <string name="push_on">Уведомления включены. Текст сообщений в них не попадает, только факт, что что-то пришло.</string>
+    <string name="push_off">Получать уведомления, когда приложение закрыто. Нужно приложение UnifiedPush, например ntfy.</string>
+    <string name="push_enable">Включить</string>
+    <string name="push_disable">Выключить</string>
+    <string name="push_no_distributor">Установите приложение UnifiedPush (например, ntfy) и откройте TS заново.</string>
+    <string name="push_server_unsupported">Этот сервер не настроен на уведомления.</string>
 </resources>

@@ -22,6 +22,8 @@ pub struct Config {
     pub vapid_private_key: Option<String>,
     /// VAPID public key for Web Push (base64 URL-safe encoded).
     pub vapid_public_key: Option<String>,
+    /// Optional allowlist for push endpoint hosts (exact host or parent domain). Empty = any HTTPS host.
+    pub push_allowed_hosts: Vec<String>,
     /// Per-user upload quota in MB (0 = unlimited). Default 500 MB.
     pub upload_quota_mb: u64,
     /// OIDC issuer URL (e.g. https://auth.example.com/application/o/ts/)
@@ -142,6 +144,12 @@ impl Config {
             ice_servers_json,
             vapid_private_key: std::env::var("VAPID_PRIVATE_KEY").ok(),
             vapid_public_key: std::env::var("VAPID_PUBLIC_KEY").ok(),
+            push_allowed_hosts: std::env::var("PUSH_ALLOWED_HOSTS")
+                .unwrap_or_default()
+                .split(',')
+                .map(|h| h.trim().trim_start_matches('.').to_ascii_lowercase())
+                .filter(|h| !h.is_empty())
+                .collect(),
             upload_quota_mb,
             oidc_issuer_url,
             oidc_client_id,

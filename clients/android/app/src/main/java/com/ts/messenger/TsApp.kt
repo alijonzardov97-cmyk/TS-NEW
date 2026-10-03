@@ -6,6 +6,7 @@ class TsApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        com.ts.messenger.push.Notifications.ensureChannel(this)
     }
 
     companion object {

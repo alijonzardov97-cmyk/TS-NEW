@@ -27,6 +27,22 @@ async fn get_vapid_key(
     }))
 }
 
+/// True if no allowlist is configured, or the endpoint's host equals or is a subdomain of an entry.
+fn endpoint_host_allowed(endpoint: &str, allowed: &[String]) -> bool {
+    if allowed.is_empty() {
+        return true;
+    }
+    let Ok(url) = url::Url::parse(endpoint) else { return false };
+    if !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    let Some(host) = url.host_str() else { return false };
+    let host = host.to_ascii_lowercase();
+    allowed
+        .iter()
+        .any(|a| host == *a || host.ends_with(&format!(".{a}")))
+}
+
 /// Subscribe the client's push endpoint.
 async fn subscribe(
     State(state): State<Arc<AppState>>,
@@ -42,6 +58,11 @@ async fn subscribe(
     }
     if !req.endpoint.starts_with("https://") {
         return Err((StatusCode::BAD_REQUEST, "Endpoint must use HTTPS".into()));
+    }
+    // The server will POST to this URL, so an operator can restrict it to known push services
+    // (for example a self-hosted ntfy) to rule out requests to arbitrary internal hosts.
+    if !endpoint_host_allowed(&req.endpoint, &state.config.push_allowed_hosts) {
+        return Err((StatusCode::BAD_REQUEST, "Push endpoint host is not allowed".into()));
     }
 
     push_subscription_repo::upsert_subscription(

@@ -81,4 +81,13 @@
     <string name="identity_changed_body">This contact\'s security key is different from the one saved before. They may have a new device, but someone could also be intercepting the conversation. Compare the safety number with them in person or over a call you trust before continuing.</string>
     <string name="identity_changed_accept">Trust the new key</string>
     <string name="identity_changed_reject">Not now</string>
+    <string name="notif_channel_name">Messages</string>
+    <string name="notif_new_message">New message</string>
+    <string name="push_title">Notifications</string>
+    <string name="push_on">Notifications are on. Messages are never included in them, only the fact that something arrived.</string>
+    <string name="push_off">Get notified when the app is closed. Needs a UnifiedPush app such as ntfy.</string>
+    <string name="push_enable">Turn on</string>
+    <string name="push_disable">Turn off</string>
+    <string name="push_no_distributor">Install a UnifiedPush app (for example ntfy), then reopen TS.</string>
+    <string name="push_server_unsupported">This server is not set up for notifications.</string>
 </resources>

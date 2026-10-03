@@ -52,6 +52,30 @@ Tailscale certificates come from Let's Encrypt and are renewed roughly every 90 
 certificate changes, the app shows the old and new fingerprints and asks whether to trust the new
 one. Confirm only if you expect a renewal.
 
+## Notifications (UnifiedPush)
+
+The Android app receives notifications through [UnifiedPush](https://unifiedpush.org), so no Google
+services are involved. The server sends standard Web Push messages that contain only metadata
+(sender name and conversation), never message text.
+
+1. Run a UnifiedPush distributor that the server can reach, for example a self-hosted
+   [ntfy](https://ntfy.sh) on the same host. Publish it inside the tailnet over HTTPS
+   (for example `tailscale serve --bg --https=8443 http://127.0.0.1:2586`), and install the ntfy
+   app on each phone, pointing it at that address.
+2. Generate a VAPID key pair (for example `npx web-push generate-vapid-keys`) and set
+   `VAPID_PRIVATE_KEY` and `VAPID_PUBLIC_KEY` in `.env`.
+3. Restrict where the server may send pushes, so it cannot be asked to contact arbitrary hosts:
+
+   ```
+   PUSH_ALLOWED_HOSTS=<host>.<tailnet>.ts.net
+   ```
+
+   Entries match the host itself and its subdomains; several can be separated by commas.
+4. In the app, open the chat list and tap **Turn on** under Notifications.
+
+The notification shows only the sender on an unlocked phone and a generic "New message" on the
+lock screen.
+
 ## Hardening checklist
 
 - Encrypt the host disk (LUKS or BitLocker) and keep the OS and Docker images updated.

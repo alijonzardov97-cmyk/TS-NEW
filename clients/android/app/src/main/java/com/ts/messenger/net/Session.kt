@@ -18,7 +18,8 @@ class Session(
     private val store: SecureStore,
     private val refreshCall: suspend (String) -> TokenResponse,
 ) {
-    private val mutex = Mutex()
+    // Shared by every instance (UI and push service) so a rotating refresh token is never used twice.
+    private val mutex = LOCK
 
     /** A valid access token, refreshing first if it expires within a minute. Null if signed out. */
     suspend fun accessToken(): String? = mutex.withLock {
@@ -66,6 +67,7 @@ class Session(
     private fun JsonObject.expOrNull(): Long? = this["exp"]?.jsonPrimitive?.longOrNull
 
     companion object {
+        private val LOCK = Mutex()
         const val K_ACCESS = "auth.access"
         const val K_REFRESH = "auth.refresh"
     }

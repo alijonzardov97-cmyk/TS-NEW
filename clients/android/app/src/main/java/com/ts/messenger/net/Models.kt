@@ -177,3 +177,27 @@ data class WireMessage(
     val ciphertext: List<Int>,
     val nonce: List<Int>,
 )
+
+// ── Push notifications ──
+
+@Serializable
+data class VapidKeyResponse(@SerialName("public_key") val publicKey: String)
+
+@Serializable
+data class PushSubscribeRequest(
+    val endpoint: String,
+    @SerialName("p256dh_key") val p256dhKey: String,
+    @SerialName("auth_key") val authKey: String,
+)
+
+@Serializable
+data class PushUnsubscribeRequest(val endpoint: String)
+
+/** Metadata-only payload the server sends; it never contains message text. */
+@Serializable
+data class PushPayload(
+    @SerialName("notification_type") val notificationType: String = "",
+    @SerialName("sender_name") val senderName: String = "",
+    @SerialName("channel_id") val channelId: String = "",
+    @SerialName("channel_name") val channelName: String = "",
+)

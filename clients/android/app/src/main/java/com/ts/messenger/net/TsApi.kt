@@ -151,6 +151,24 @@ class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
             bearer(u, it).get().build()
         }) { AppJson.decodeFromString(it) }
 
+    /** Public: the server's VAPID key, or an ApiException(404) when push is not configured. */
+    suspend fun vapidKey(): String =
+        call(Request.Builder().url(url("/push/vapid-key")).get().build()) {
+            AppJson.decodeFromString<VapidKeyResponse>(it).publicKey
+        }
+
+    suspend fun subscribePush(endpoint: String, p256dh: String, auth: String) =
+        authed({
+            bearer(url("/push/subscribe"), it)
+                .post(AppJson.encodeToString(PushSubscribeRequest(endpoint, p256dh, auth)).toRequestBody(JSON_MEDIA)).build()
+        }) { }
+
+    suspend fun unsubscribePush(endpoint: String) =
+        authed({
+            bearer(url("/push/unsubscribe"), it)
+                .post(AppJson.encodeToString(PushUnsubscribeRequest(endpoint)).toRequestBody(JSON_MEDIA)).build()
+        }) { }
+
     private fun post(path: String, json: String) =
         Request.Builder().url(url(path)).post(json.toRequestBody(JSON_MEDIA)).build()
 

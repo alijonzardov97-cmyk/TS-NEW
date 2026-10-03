@@ -16,6 +16,9 @@ import com.ts.messenger.net.DmChannel
 import com.ts.messenger.net.KeyRegistrationRequest
 import com.ts.messenger.net.Session
 import com.ts.messenger.net.SocketEvent
+import com.ts.messenger.push.PushRegistry
+import kotlinx.coroutines.withTimeoutOrNull
+import org.unifiedpush.android.connector.UnifiedPush
 import com.ts.messenger.net.ApiException
 import com.ts.messenger.net.AppJson
 import com.ts.messenger.net.CertificateChangedException
@@ -40,6 +43,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+
+enum class PushStatus { Off, On, NoDistributor, ServerUnsupported }
 
 sealed interface Screen {
     data object Connect : Screen
@@ -71,6 +76,7 @@ data class UiState(
     val identityAlert: PeerIdentityChangedException? = null,
     val searchResults: List<UserPublic> = emptyList(),
     @StringRes val notice: Int? = null,
+    val push: PushStatus = PushStatus.Off,
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -250,12 +256,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun signOut() {
-        stopChat()
-        store.wipeAll()
-        api = null
-        baseUrl = null
-        pins = emptyList()
-        _state.update { UiState(unlocked = true, screen = Screen.Connect) }
+        val a = api
+        val app = getApplication<Application>()
+        _state.update { it.copy(busy = true) }
+        viewModelScope.launch {
+            // Stop the server from sending notifications to this device for the account that is
+            // leaving; never let a slow network block signing out for long.
+            if (a != null) {
+                withTimeoutOrNull(5_000) { runCatching { PushRegistry(store).unsubscribe(a) } }
+            }
+            runCatching { UnifiedPush.unregister(app) }
+            stopChat()
+            store.wipeAll()
+            api = null
+            baseUrl = null
+            pins = emptyList()
+            _state.value = UiState(unlocked = true, screen = Screen.Connect)
+        }
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
@@ -311,6 +328,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         sock.start()
         refreshDms()
+        syncPush()
     }
 
     private fun stopChat() {
@@ -320,6 +338,63 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         socket = null
         repo = null
         dmIds = emptyList()
+    }
+
+    // ── Notifications (UnifiedPush) ──
+
+    private fun syncPush() {
+        val a = api ?: return
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            runCatching { PushRegistry(store).sync(a) }
+            val hasEndpoint = PushRegistry(store).load() != null
+            val status = when {
+                hasEndpoint && UnifiedPush.getAckDistributor(app) != null -> PushStatus.On
+                UnifiedPush.getDistributors(app).isEmpty() -> PushStatus.NoDistributor
+                else -> PushStatus.Off
+            }
+            _state.update { it.copy(push = status) }
+        }
+    }
+
+    /** Called once the notification permission question has been answered. */
+    fun enablePush() {
+        val a = api ?: return
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val distributors = UnifiedPush.getDistributors(app)
+            if (distributors.isEmpty()) {
+                _state.update { it.copy(push = PushStatus.NoDistributor) }
+                return@launch
+            }
+            val vapid = try {
+                a.vapidKey()
+            } catch (e: ApiException) {
+                _state.update { it.copy(push = if (e.status == 404) PushStatus.ServerUnsupported else it.push, error = if (e.status == 404) null else R.string.error_generic) }
+                return@launch
+            } catch (e: CertificateChangedException) {
+                presentCertChange()
+                return@launch
+            } catch (e: Exception) {
+                _state.update { it.copy(error = errorRes(e)) }
+                return@launch
+            }
+            // Passing the server's VAPID key lets the distributor reject pushes from anyone else.
+            UnifiedPush.saveDistributor(app, distributors.first())
+            UnifiedPush.register(app, vapid = vapid)
+            _state.update { it.copy(push = PushStatus.On, error = null) }
+        }
+    }
+
+    fun disablePush() {
+        val a = api
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            if (a != null) withTimeoutOrNull(5_000) { runCatching { PushRegistry(store).unsubscribe(a) } }
+            runCatching { UnifiedPush.unregister(app) }
+            PushRegistry(store).clear()
+            _state.update { it.copy(push = PushStatus.Off) }
+        }
     }
 
     fun refreshDms() {
