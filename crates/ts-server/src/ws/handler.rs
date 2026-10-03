@@ -1083,6 +1083,38 @@ async fn handle_client_message(
                                 user_id,
                             },
                         );
+
+                        // A call started in a DM: ring the other person by push if they are
+                        // not connected (connected clients already got UserJoinedVoice).
+                        if participants.len() == 1
+                            && let Some(ref push_svc) = state.push_service
+                            && let Ok(Some(ch)) = channel_repo::get_channel(&state.db, channel_id).await
+                            && ch.channel_type == ChannelType::Dm
+                            && let Ok(members) = channel_repo::list_members(&state.db, channel_id).await
+                        {
+                            for member in members.iter().filter(|m| m.user_id != user_id) {
+                                if conn_mgr.is_online(&member.user_id) {
+                                    continue;
+                                }
+                                let push_svc = push_svc.clone();
+                                let pool = state.db.clone();
+                                let recipient_id = member.user_id;
+                                let ch_id = channel_id.to_string();
+                                tokio::spawn(async move {
+                                    let sender_name = match user_repo::find_by_id(&pool, user_id).await {
+                                        Ok(Some(u)) => u.display_name,
+                                        _ => "Someone".to_string(),
+                                    };
+                                    let payload = crate::services::push_service::PushPayload {
+                                        notification_type: "call".to_string(),
+                                        sender_name,
+                                        channel_id: ch_id,
+                                        channel_name: "Direct Message".to_string(),
+                                    };
+                                    push_svc.send_to_user(&pool, recipient_id, &payload).await;
+                                });
+                            }
+                        }
                     }
                 }
                 Err(e) => {

@@ -169,7 +169,12 @@ fun AppContent(
     onEnablePush: () -> Unit,
     onPickFile: () -> Unit,
     onSaveFile: (com.ts.messenger.net.FileRef) -> Unit,
+    withMic: (() -> Unit) -> Unit,
 ) {
+    if (state.call.phase != com.ts.messenger.call.CallPhase.Idle) {
+        CallScreen(state.call, { withMic(vm::acceptCall) }, vm::declineCall, vm::hangupCall, vm::toggleMute, vm::toggleSpeaker)
+        return
+    }
     when (val s = state.screen) {
         Screen.Connect -> ConnectScreen(state, vm::connect)
         is Screen.ConfirmPin -> ConfirmPinScreen(s.probe, state.busy, state.error, { vm.confirmPin(s.probe) }, vm::cancelPin)
@@ -178,13 +183,20 @@ fun AppContent(
         is Screen.Recovery -> RecoveryScreen(s.code, vm::recoverySaved)
         Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice, onEnablePush, vm::disablePush)
         Screen.NewChat -> NewChatScreen(state, vm::search, vm::startChatWith, vm::leaveNewChat)
-        Screen.Chat -> ChatScreen(state, vm::closeChat, vm::sendMessage, onPickFile, onSaveFile, vm::loadImage)
+        Screen.Chat -> ChatScreen(state, vm::closeChat, vm::sendMessage, onPickFile, onSaveFile, vm::loadImage) { withMic(vm::startCall) }
     }
     state.identityAlert?.let { alert ->
         IdentityChangedDialog(alert, vm::acceptIdentity, vm::dismissIdentityAlert)
     }
     state.certChange?.let { change ->
         CertChangedDialog(change, vm::acceptCertChange, vm::rejectCertChange)
+    }
+    state.call.notice?.let { res ->
+        AlertDialog(
+            onDismissRequest = vm::dismissCallNotice,
+            text = { Text(stringResource(res)) },
+            confirmButton = { TextButton(onClick = vm::dismissCallNotice) { Text(stringResource(R.string.call_ok)) } },
+        )
     }
 }
 

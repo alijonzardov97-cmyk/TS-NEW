@@ -31,6 +31,8 @@ sealed interface SocketEvent {
     /** The server accepted one of our messages. */
     data class Sent(val id: String, val channelId: String, val createdAt: String) : SocketEvent
     data object Closed : SocketEvent
+    /** Call signalling and voice-channel state, handled by the call manager. */
+    data class Voice(val type: String, val data: JsonObject) : SocketEvent
 }
 
 /**
@@ -89,6 +91,13 @@ class ChatSocket(
         }.toString())
     }
 
+    /** Sends a prepared JSON frame (call signalling). */
+    fun sendJson(obj: JsonObject): Boolean {
+        val ws = socket
+        if (!ready || ws == null) return false
+        return ws.send(obj.toString())
+    }
+
     /** Returns false if the socket is not ready, in which case nothing was sent. */
     fun sendMessage(channelId: String, ciphertext: List<Int>, nonce: List<Int>, messageType: String = "text"): Boolean {
         val ws = socket
@@ -134,6 +143,9 @@ class ChatSocket(
                     }
                     "new_message" -> runCatching { AppJson.decodeFromJsonElement(MessageDto.serializer(), obj) }
                         .getOrNull()?.let { _events.tryEmit(SocketEvent.Incoming(it)) }
+                    "voice_state_update", "user_joined_voice", "user_left_voice",
+                    "rtc_offer", "rtc_answer", "rtc_ice_candidate" ->
+                        _events.tryEmit(SocketEvent.Voice(obj.str("type")!!, obj))
                     "message_sent" -> {
                         val id = obj.str("id"); val ch = obj.str("channel_id"); val at = obj.str("created_at")
                         if (id != null && ch != null && at != null) _events.tryEmit(SocketEvent.Sent(id, ch, at))

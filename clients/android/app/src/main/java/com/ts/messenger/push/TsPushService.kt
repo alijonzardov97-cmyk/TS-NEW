@@ -40,7 +40,11 @@ class TsPushService : PushService() {
                 AppJson.decodeFromString<PushPayload>(String(message.content.copyOf(minOf(message.content.size, 4096)), Charsets.UTF_8))
             }.getOrNull()
         } else null
-        Notifications.showNewMessage(applicationContext, payload)
+        if (payload?.notificationType == "call" && payload.channelId.matches(Regex("[0-9a-fA-F-]{36}"))) {
+            Notifications.showIncomingCall(applicationContext, payload.senderName, payload.channelId)
+        } else {
+            Notifications.showNewMessage(applicationContext, payload)
+        }
     }
 
     override fun onRegistrationFailed(reason: FailedReason, instance: String) {

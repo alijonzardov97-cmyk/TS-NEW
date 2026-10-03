@@ -97,4 +97,27 @@
     <string name="file_unsupported">Отправлен из веб-версии без шифрования — не открывается ради вашей безопасности.</string>
     <string name="error_file_too_large">Файл слишком большой (лимит 25 МБ).</string>
     <string name="error_file_failed">Не удалось обработать файл.</string>
+    <string name="call_button">Позвонить</string>
+    <string name="call_incoming">Входящий звонок</string>
+    <string name="call_calling">Вызов…</string>
+    <string name="call_connecting">Соединение…</string>
+    <string name="call_active">Идёт разговор</string>
+    <string name="call_accept">Ответить</string>
+    <string name="call_decline">Отклонить</string>
+    <string name="call_hangup">Завершить</string>
+    <string name="call_mute">Выключить микрофон</string>
+    <string name="call_unmute">Включить микрофон</string>
+    <string name="call_speaker">Динамик</string>
+    <string name="call_earpiece">Разговорный</string>
+    <string name="call_code_title">Код сверки</string>
+    <string name="call_code_hint">Прочитайте этот код друг другу вслух. Если коды разные — звонок перехватывают: положите трубку.</string>
+    <string name="call_no_answer">Нет ответа.</string>
+    <string name="call_failed">Не удалось соединить звонок.</string>
+    <string name="call_ended">Звонок завершён.</string>
+    <string name="call_missed">Пропущенный звонок.</string>
+    <string name="call_ok">ОК</string>
+    <string name="notif_call_channel">Звонки</string>
+    <string name="notif_call_ongoing_channel">Идёт звонок</string>
+    <string name="notif_call_ongoing">Идёт звонок</string>
+    <string name="notif_incoming_call">Входящий звонок</string>
 </resources>

@@ -81,7 +81,8 @@ fun ConversationListScreen(
         state.dms.forEach { dm ->
             Card(modifier = Modifier.fillMaxWidth().clickable { onOpen(dm) }) {
                 Column(modifier = Modifier.padding(16.dp).heightIn(min = 40.dp)) {
-                    Text(dm.otherUser.displayName, style = MaterialTheme.typography.titleMedium)
+                    Text(dm.otherUser.displayName, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = onCall, enabled = state.connected) { Text(stringResource(R.string.call_button)) }
                     Text("@${dm.otherUser.username}", style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -145,6 +146,7 @@ fun ChatScreen(
     onPickFile: () -> Unit,
     onSaveFile: (FileRef) -> Unit,
     loadImage: suspend (FileRef) -> android.graphics.Bitmap?,
+    onCall: () -> Unit,
 ) {
     val dm = state.current ?: return
     // Deliberately not rememberSaveable: an unsent draft must not end up in saved instance state.

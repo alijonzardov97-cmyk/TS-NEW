@@ -97,4 +97,27 @@
     <string name="file_unsupported">Sent unencrypted from the web version, not opened for your safety.</string>
     <string name="error_file_too_large">The file is too large (limit 25 MB).</string>
     <string name="error_file_failed">Could not process the file.</string>
+    <string name="call_button">Call</string>
+    <string name="call_incoming">Incoming call</string>
+    <string name="call_calling">Calling…</string>
+    <string name="call_connecting">Connecting…</string>
+    <string name="call_active">Call in progress</string>
+    <string name="call_accept">Answer</string>
+    <string name="call_decline">Decline</string>
+    <string name="call_hangup">End call</string>
+    <string name="call_mute">Mute</string>
+    <string name="call_unmute">Unmute</string>
+    <string name="call_speaker">Speaker</string>
+    <string name="call_earpiece">Earpiece</string>
+    <string name="call_code_title">Verification code</string>
+    <string name="call_code_hint">Read this code aloud to each other. If it differs, someone is intercepting the call: hang up.</string>
+    <string name="call_no_answer">No answer.</string>
+    <string name="call_failed">The call could not be connected.</string>
+    <string name="call_ended">The call has ended.</string>
+    <string name="call_missed">Missed call.</string>
+    <string name="call_ok">OK</string>
+    <string name="notif_call_channel">Calls</string>
+    <string name="notif_call_ongoing_channel">Call in progress</string>
+    <string name="notif_call_ongoing">Call in progress</string>
+    <string name="notif_incoming_call">Incoming call</string>
 </resources>

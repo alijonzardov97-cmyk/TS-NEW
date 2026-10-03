@@ -47,6 +47,35 @@ class MainActivity : FragmentActivity() {
         saveFile.launch(ref.name)
     }
 
+    private var afterMic: (() -> Unit)? = null
+    private val micPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val action = afterMic
+            afterMic = null
+            if (granted) action?.invoke()
+        }
+
+    /** Runs [action] once the microphone permission is available. */
+    private fun withMic(action: () -> Unit) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            action()
+        } else {
+            afterMic = action
+            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    private fun handleIntent(intent: android.content.Intent?) {
+        val ch = intent?.getStringExtra(com.ts.messenger.push.Notifications.EXTRA_CALL_CHANNEL) ?: return
+        intent.removeExtra(com.ts.messenger.push.Notifications.EXTRA_CALL_CHANNEL)
+        if (ch.matches(Regex("[0-9a-fA-F-]{36}"))) vm.callFromNotification(ch)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
     private fun enablePush() {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -63,13 +92,14 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         // Ignore taps while another window overlays this one (tapjacking protection).
         window.decorView.filterTouchesWhenObscured = true
+        handleIntent(intent)
 
         setContent {
             TsTheme {
                 val state by vm.state.collectAsState()
                 val lockAvailable = remember { AppLock.isAvailable(this) }
                 if (state.unlocked) {
-                    AppContent(state, vm, ::enablePush, { pickFile.launch("*/*") }, ::saveFile)
+                    AppContent(state, vm, ::enablePush, { pickFile.launch("*/*") }, ::saveFile, ::withMic)
                 } else {
                     LockScreen(noLockSet = !lockAvailable, failed = unlockFailed, onUnlock = ::promptUnlock)
                 }

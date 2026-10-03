@@ -6,6 +6,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ts.messenger.chat.ChatLog
 import com.ts.messenger.chat.ChatRepository
+import com.ts.messenger.call.CallManager
+import com.ts.messenger.call.CallUi
 import com.ts.messenger.files.FileService
 import com.ts.messenger.files.FileTooLargeException
 import com.ts.messenger.net.FileRef
@@ -81,6 +83,7 @@ data class UiState(
     @StringRes val notice: Int? = null,
     val push: PushStatus = PushStatus.Off,
     val uploading: Boolean = false,
+    val call: CallUi = CallUi(),
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -98,6 +101,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val chatLog = ChatLog(store)
     private var repo: ChatRepository? = null
     private var fileSvc: FileService? = null
+    private var calls: CallManager? = null
+    private var pendingCallChannel: String? = null
     private val thumbs = android.util.LruCache<String, android.graphics.Bitmap>(8)
     private var socket: ChatSocket? = null
     private var chatJob: Job? = null
@@ -314,6 +319,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val fs = FileService(getApplication<Application>(), a)
         fileSvc = fs
         val r = ChatRepository(a, ChatCrypto(store, keyVault), chatLog, sock, me.id, fs)
+        val cm = CallManager(getApplication<Application>(), viewModelScope, sock, me.id) { ch ->
+            _state.value.dms.firstOrNull { it.channel.id == ch }?.let { it.otherUser.id to it.otherUser.displayName }
+        }
+        calls = cm
         repo = r
         socket = sock
         chatJob = viewModelScope.launch {
@@ -325,6 +334,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         SocketEvent.Closed -> _state.update { it.copy(connected = false) }
                         is SocketEvent.Incoming -> runCatching { r.onIncoming(e.message) }
                         is SocketEvent.Sent -> r.onSent(e.id, e.channelId, e.createdAt)
+                        is SocketEvent.Voice -> cm.onEvent(e.type, e.data)
                     }
                 }
             }
@@ -335,6 +345,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             }
+            launch { cm.ui.collect { c -> _state.update { it.copy(call = c) } } }
             launch { r.identityAlerts.collect { al -> _state.update { it.copy(identityAlert = al) } } }
         }
         sock.start()
@@ -343,6 +354,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun stopChat() {
+        calls?.shutdown()
+        calls = null
         chatJob?.cancel()
         chatJob = null
         socket?.stop()
@@ -417,6 +430,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 dmIds = dms.map { it.channel.id }
                 socket?.let { s -> dms.forEach { s.subscribe(it.channel.id) } }
                 _state.update { it.copy(dms = dms) }
+                pendingCallChannel?.let { ch -> pendingCallChannel = null; calls?.ringFromPush(ch) }
             } catch (e: CertificateChangedException) {
                 presentCertChange()
             } catch (_: Exception) {
@@ -513,6 +527,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: Exception) {
             null
         }
+    }
+
+    // ── Calls ──
+
+    fun startCall() {
+        val dm = _state.value.current ?: return
+        calls?.startOutgoing(dm.channel.id)
+    }
+
+    fun acceptCall() { calls?.accept() }
+    fun declineCall() { calls?.decline() }
+    fun hangupCall() { calls?.hangup() }
+    fun toggleMute() { calls?.toggleMute() }
+    fun toggleSpeaker() { calls?.toggleSpeaker() }
+    fun dismissCallNotice() { calls?.clearNotice() }
+
+    /** The user tapped an incoming-call notification. */
+    fun callFromNotification(channelId: String) {
+        val c = calls
+        if (c != null && _state.value.dms.any { it.channel.id == channelId }) c.ringFromPush(channelId)
+        else pendingCallChannel = channelId
     }
 
     fun acceptIdentity() {

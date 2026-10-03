@@ -14,3 +14,6 @@
 -keepattributes *Annotation*, InnerClasses
 -keepclassmembers class kotlinx.serialization.json.** { *** Companion; }
 -keepclasseswithmembers class com.ts.messenger.** { kotlinx.serialization.KSerializer serializer(...); }
+# WebRTC is reached from native code.
+-keep class org.webrtc.** { *; }
+-dontwarn org.webrtc.**
