@@ -111,6 +111,16 @@ fun ConversationListScreen(
                         }
                     }
                 }
+                if (state.connected) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().background(colors.primary.copy(alpha = 0.08f)).padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TsIcon(IconKind.Lock, colors.primary, 14.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text("${stringResource(R.string.sec_home)} · ${stringResource(R.string.sec_e2e)}", style = MaterialTheme.typography.labelMedium, color = colors.primary)
+                    }
+                }
                 if (!state.connected) {
                     Text(
                         stringResource(R.string.offline_banner),
@@ -269,7 +279,11 @@ fun ChatScreen(
                 Avatar(title, other.id, size = 40.dp)
                 Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                     Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("@${other.username}", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TsIcon(IconKind.Lock, colors.primary, 13.dp)
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.sec_encrypted), style = MaterialTheme.typography.bodySmall, color = colors.primary, maxLines = 1)
+                    }
                 }
                 IconBtn(IconKind.Shield, colors.onSurfaceVariant, onClick = onSafety)
                 IconBtn(IconKind.Phone, colors.primary, enabled = state.connected, onClick = onCall)
@@ -285,13 +299,16 @@ fun ChatScreen(
             }
             if (state.messages.isEmpty()) {
                 Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(
-                        stringResource(R.string.empty_chat),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(32.dp),
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                        SecureNotice()
+                        Text(
+                            stringResource(R.string.empty_chat),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 16.dp),
+                        )
+                    }
                 }
             } else {
                 val reversed = remember(state.messages) { state.messages.asReversed() }
@@ -304,6 +321,7 @@ fun ChatScreen(
                     itemsIndexed(reversed, key = { _, m -> m.id }) { i, m ->
                         val older = reversed.getOrNull(i + 1)
                         Column {
+                            if (older == null) SecureNotice()
                             if (older == null || localDate(older.createdAt) != localDate(m.createdAt)) {
                                 DateChip(m.createdAt)
                             }
@@ -359,6 +377,20 @@ fun ChatScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SecureNotice() {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(14.dp)).background(colors.surface.copy(alpha = 0.9f)).padding(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        TsIcon(IconKind.ShieldLock, colors.primary, 22.dp)
+        Spacer(Modifier.width(10.dp))
+        Text(stringResource(R.string.sec_chat_notice), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
     }
 }
 

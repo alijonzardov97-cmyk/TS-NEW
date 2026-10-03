@@ -124,4 +124,10 @@
     <string name="safety_title">Safety number</string>
     <string name="safety_body">Compare this number with your contact in person or by phone. If it matches on both devices, nobody is intercepting this chat.</string>
     <string name="safety_unavailable">Available after the first message has been exchanged.</string>
+    <string name="sec_e2e">End-to-end encrypted</string>
+    <string name="sec_pinned">Server certificate pinned</string>
+    <string name="sec_local">Keys stay on this device</string>
+    <string name="sec_home">Secure connection</string>
+    <string name="sec_chat_notice">Messages and files are end-to-end encrypted: only you and your contact can read them. Compare the safety code (shield icon) to be sure it is really them.</string>
+    <string name="sec_encrypted">encrypted</string>
 </resources>

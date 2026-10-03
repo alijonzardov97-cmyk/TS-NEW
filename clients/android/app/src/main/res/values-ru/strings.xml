@@ -124,4 +124,10 @@
     <string name="safety_title">Код безопасности</string>
     <string name="safety_body">Сверьте этот номер с собеседником лично или по телефону. Если он одинаков на обоих устройствах, переписку никто не перехватывает.</string>
     <string name="safety_unavailable">Появится после первого обмена сообщениями.</string>
+    <string name="sec_e2e">Сквозное шифрование</string>
+    <string name="sec_pinned">Сертификат сервера закреплён</string>
+    <string name="sec_local">Ключи только на этом устройстве</string>
+    <string name="sec_home">Защищённое соединение</string>
+    <string name="sec_chat_notice">Сообщения и файлы защищены сквозным шифрованием: прочитать их можете только вы и собеседник. Сверьте код безопасности (значок щита), чтобы убедиться, что это именно он.</string>
+    <string name="sec_encrypted">зашифровано</string>
 </resources>

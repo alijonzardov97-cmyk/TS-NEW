@@ -28,7 +28,12 @@ import com.ts.messenger.net.ServerProbe
 @Composable
 fun LockScreen(noLockSet: Boolean, failed: Boolean, onUnlock: () -> Unit) {
     Page(stringResource(R.string.unlock_title)) {
-        Text(stringResource(R.string.unlock_subtitle))
+        Text(stringResource(R.string.unlock_subtitle), textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecurityChip(stringResource(R.string.sec_e2e))
+            SecurityChip(stringResource(R.string.sec_pinned))
+            SecurityChip(stringResource(R.string.sec_local))
+        }
         if (noLockSet) Text(stringResource(R.string.unlock_no_lock), color = MaterialTheme.colorScheme.error)
         else {
             if (failed) Text(stringResource(R.string.unlock_failed), color = MaterialTheme.colorScheme.error)

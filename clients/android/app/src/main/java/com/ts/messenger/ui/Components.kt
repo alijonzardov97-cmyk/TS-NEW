@@ -68,11 +68,14 @@ fun Page(title: String, content: @Composable () -> Unit) {
         ) {
             Spacer(Modifier.height(16.dp))
             Box(
-                modifier = Modifier.size(84.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
+                modifier = Modifier.size(96.dp).clip(CircleShape).background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF3390EC), Color(0xFF1B5FA8))),
+                ),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("TS", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                TsIcon(IconKind.ShieldLock, Color.White, 52.dp)
             }
+            Text("TS", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Text(
                 title,
                 style = MaterialTheme.typography.headlineSmall,
@@ -224,5 +227,20 @@ fun TopBar(content: @Composable RowScope.() -> Unit) {
             content = content,
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+/** Small pill with a lock/shield icon, used to state security properties. */
+@Composable
+fun SecurityChip(text: String) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(colors.primary.copy(alpha = 0.12f))
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TsIcon(IconKind.Lock, colors.primary, 16.dp)
+        Spacer(Modifier.size(6.dp))
+        Text(text, style = MaterialTheme.typography.labelLarge, color = colors.primary)
     }
 }
