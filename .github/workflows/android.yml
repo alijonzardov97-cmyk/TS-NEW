@@ -72,7 +72,17 @@ jobs:
       - name: Build signed release APK
         env:
           KEYSTORE_FILE: ${{ runner.temp }}/release.jks
-        run: gradle -p clients/android :app:assembleRelease --no-daemon --stacktrace
+        run: |
+          # Maven Central sometimes answers 429 to shared CI runners; retry the whole build
+          # (already downloaded artifacts are kept, so retries are quick).
+          for attempt in 1 2 3; do
+            if gradle -p clients/android :app:assembleRelease --no-daemon --stacktrace; then
+              exit 0
+            fi
+            echo "Build attempt $attempt failed"
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 60))
+          done
+          exit 1
 
       - name: Remove keystore
         if: always()
