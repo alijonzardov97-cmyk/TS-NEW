@@ -39,8 +39,10 @@ object Notifications {
         ensureChannel(context)
         val sender = payload?.senderName?.let(::clean)?.takeIf { it.isNotEmpty() }
         val open = PendingIntent.getActivity(
-            context, 0,
-            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            context, (payload?.channelId ?: "").hashCode(),
+            Intent(context, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_CHAT_CHANNEL, payload?.channelId ?: ""),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val publicVersion = NotificationCompat.Builder(context, CHANNEL_ID)
@@ -62,6 +64,7 @@ object Notifications {
         runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
     }
 
+    const val EXTRA_CHAT_CHANNEL = "ts_chat_channel"
     const val EXTRA_CALL_CHANNEL = "ts_call_channel"
     private const val CALL_CHANNEL_ID = "calls"
     private const val CALL_NOTIFICATION_ID = 7001

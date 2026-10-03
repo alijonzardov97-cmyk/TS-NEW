@@ -120,4 +120,8 @@
     <string name="notif_call_ongoing_channel">Call in progress</string>
     <string name="notif_call_ongoing">Call in progress</string>
     <string name="notif_incoming_call">Incoming call</string>
+    <string name="safety_button">Code</string>
+    <string name="safety_title">Safety number</string>
+    <string name="safety_body">Compare this number with your contact in person or by phone. If it matches on both devices, nobody is intercepting this chat.</string>
+    <string name="safety_unavailable">Available after the first message has been exchanged.</string>
 </resources>

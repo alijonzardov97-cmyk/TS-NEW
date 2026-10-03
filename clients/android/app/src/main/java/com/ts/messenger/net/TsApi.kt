@@ -146,6 +146,22 @@ class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
                 .post(AppJson.encodeToString(req).toRequestBody(JSON_MEDIA)).build()
         }) { }
 
+    suspend fun prekeyCount(): Int =
+        authed({ bearer(url("/keys/prekeys/count"), it).get().build() }) {
+            AppJson.parseToJsonElement(it).let { e ->
+                (e as kotlinx.serialization.json.JsonObject)["count"]
+                    ?.let { c -> (c as kotlinx.serialization.json.JsonPrimitive).content.toIntOrNull() } ?: 0
+            }
+        }
+
+    suspend fun uploadOneTimePrekeys(keys: List<OneTimePrekeyUpload>) =
+        authed({
+            val body = AppJson.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(OneTimePrekeyUpload.serializer()), keys,
+            )
+            bearer(url("/keys/prekeys/one-time"), it).post(body.toRequestBody(JSON_MEDIA)).build()
+        }) { }
+
     suspend fun searchUsers(query: String): List<UserPublic> =
         authed({
             val u = url("/users/search").newBuilder().addQueryParameter("q", query).build()

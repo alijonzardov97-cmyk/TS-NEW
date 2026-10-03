@@ -66,9 +66,16 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun handleIntent(intent: android.content.Intent?) {
-        val ch = intent?.getStringExtra(com.ts.messenger.push.Notifications.EXTRA_CALL_CHANNEL) ?: return
-        intent.removeExtra(com.ts.messenger.push.Notifications.EXTRA_CALL_CHANNEL)
-        if (ch.matches(Regex("[0-9a-fA-F-]{36}"))) vm.callFromNotification(ch)
+        if (intent == null) return
+        val id = Regex("[0-9a-fA-F-]{36}")
+        intent.getStringExtra(com.ts.messenger.push.Notifications.EXTRA_CHAT_CHANNEL)?.let { ch ->
+            intent.removeExtra(com.ts.messenger.push.Notifications.EXTRA_CHAT_CHANNEL)
+            if (ch.matches(id)) vm.openChatFromNotification(ch)
+        }
+        intent.getStringExtra(com.ts.messenger.push.Notifications.EXTRA_CALL_CHANNEL)?.let { ch ->
+            intent.removeExtra(com.ts.messenger.push.Notifications.EXTRA_CALL_CHANNEL)
+            if (ch.matches(id)) vm.callFromNotification(ch)
+        }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {

@@ -84,7 +84,11 @@ data class UiState(
     val push: PushStatus = PushStatus.Off,
     val uploading: Boolean = false,
     val call: CallUi = CallUi(),
+    val safety: SafetyInfo? = null,
 )
+
+/** [number] is null while the peer's identity key is not known yet (no message exchanged). */
+data class SafetyInfo(val number: String?)
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val store = SecureStore(app)
@@ -103,6 +107,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var fileSvc: FileService? = null
     private var calls: CallManager? = null
     private var pendingCallChannel: String? = null
+    private var pendingChatChannel: String? = null
     private val thumbs = android.util.LruCache<String, android.graphics.Bitmap>(8)
     private var socket: ChatSocket? = null
     private var chatJob: Job? = null
@@ -330,7 +335,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // Sequential on purpose: incoming messages are decrypted in arrival order.
                 sock.events.collect { e ->
                     when (e) {
-                        SocketEvent.Ready -> _state.update { it.copy(connected = true) }
+                        SocketEvent.Ready -> { _state.update { it.copy(connected = true) }; replenishKeys() }
                         SocketEvent.Closed -> _state.update { it.copy(connected = false) }
                         is SocketEvent.Incoming -> runCatching { r.onIncoming(e.message) }
                         is SocketEvent.Sent -> r.onSent(e.id, e.channelId, e.createdAt)
@@ -356,6 +361,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun stopChat() {
         calls?.shutdown()
         calls = null
+        keysChecked = false
         chatJob?.cancel()
         chatJob = null
         socket?.stop()
@@ -431,6 +437,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 socket?.let { s -> dms.forEach { s.subscribe(it.channel.id) } }
                 _state.update { it.copy(dms = dms) }
                 pendingCallChannel?.let { ch -> pendingCallChannel = null; calls?.ringFromPush(ch) }
+                pendingChatChannel?.let { ch ->
+                    pendingChatChannel = null
+                    if (_state.value.user != null && _state.value.screen != Screen.Chat) dms.firstOrNull { it.channel.id == ch }?.let { openChat(it) }
+                }
             } catch (e: CertificateChangedException) {
                 presentCertChange()
             } catch (_: Exception) {
@@ -529,6 +539,38 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var keysChecked = false
+
+    /** Keeps the server stocked with one-time prekeys so new chats can always start. */
+    private fun replenishKeys() {
+        val a = api ?: return
+        if (keysChecked) return
+        keysChecked = true
+        viewModelScope.launch {
+            try {
+                if (!keyVault.hasKeys()) return@launch
+                if (a.prekeyCount() < 20) {
+                    val fresh = withContext(Dispatchers.Default) { keyVault.generateMoreOneTimePrekeys(80) }
+                    if (fresh.isNotEmpty()) a.uploadOneTimePrekeys(fresh)
+                }
+            } catch (_: Exception) {
+                keysChecked = false // try again at the next connection
+            }
+        }
+    }
+
+    fun showSafety() {
+        val dm = _state.value.current ?: return
+        val keys = repo?.safetyKeys(dm.otherUser.id)
+        val number = keys?.let { (mine, theirs) ->
+            runCatching { uniffi.ts_crypto_ffi.computeSafetyNumber(mine, theirs) }.getOrNull()
+        }
+        keys?.let { it.first.fill(0); it.second.fill(0) }
+        _state.update { it.copy(safety = SafetyInfo(number)) }
+    }
+
+    fun dismissSafety() = _state.update { it.copy(safety = null) }
+
     // ── Calls ──
 
     fun startCall() {
@@ -544,6 +586,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissCallNotice() { calls?.clearNotice() }
 
     /** The user tapped an incoming-call notification. */
+    /** The user tapped a message notification. */
+    fun openChatFromNotification(channelId: String) {
+        val dm = _state.value.dms.firstOrNull { it.channel.id == channelId }
+        if (dm != null && repo != null) openChat(dm) else pendingChatChannel = channelId
+    }
+
     fun callFromNotification(channelId: String) {
         val c = calls
         if (c != null && _state.value.dms.any { it.channel.id == channelId }) c.ringFromPush(channelId)

@@ -183,13 +183,32 @@ fun AppContent(
         is Screen.Recovery -> RecoveryScreen(s.code, vm::recoverySaved)
         Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice, onEnablePush, vm::disablePush)
         Screen.NewChat -> NewChatScreen(state, vm::search, vm::startChatWith, vm::leaveNewChat)
-        Screen.Chat -> ChatScreen(state, vm::closeChat, vm::sendMessage, onPickFile, onSaveFile, vm::loadImage) { withMic(vm::startCall) }
+        Screen.Chat -> ChatScreen(state, vm::closeChat, vm::sendMessage, onPickFile, onSaveFile, vm::loadImage, vm::showSafety) { withMic(vm::startCall) }
     }
     state.identityAlert?.let { alert ->
         IdentityChangedDialog(alert, vm::acceptIdentity, vm::dismissIdentityAlert)
     }
     state.certChange?.let { change ->
         CertChangedDialog(change, vm::acceptCertChange, vm::rejectCertChange)
+    }
+    state.safety?.let { info ->
+        AlertDialog(
+            onDismissRequest = vm::dismissSafety,
+            title = { Text(stringResource(R.string.safety_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (info.number != null) {
+                        SelectionContainer {
+                            Text(info.number, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyLarge)
+                        }
+                        Text(stringResource(R.string.safety_body), style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text(stringResource(R.string.safety_unavailable))
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = vm::dismissSafety) { Text(stringResource(R.string.call_ok)) } },
+        )
     }
     state.call.notice?.let { res ->
         AlertDialog(

@@ -120,4 +120,8 @@
     <string name="notif_call_ongoing_channel">Идёт звонок</string>
     <string name="notif_call_ongoing">Идёт звонок</string>
     <string name="notif_incoming_call">Входящий звонок</string>
+    <string name="safety_button">Код</string>
+    <string name="safety_title">Код безопасности</string>
+    <string name="safety_body">Сверьте этот номер с собеседником лично или по телефону. Если он одинаков на обоих устройствах, переписку никто не перехватывает.</string>
+    <string name="safety_unavailable">Появится после первого обмена сообщениями.</string>
 </resources>

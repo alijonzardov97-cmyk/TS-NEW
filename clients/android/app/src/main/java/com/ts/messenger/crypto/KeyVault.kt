@@ -101,12 +101,43 @@ class KeyVault(private val store: SecureStore) {
         }
     }
 
+    /**
+     * Creates [count] more one-time prekeys, stores their private halves first and returns the
+     * public halves for upload. Ids never repeat: the next free id is persisted.
+     */
+    @Synchronized
+    fun generateMoreOneTimePrekeys(count: Int): List<OneTimePrekeyUpload> {
+        val old = store.get(K_ONE_TIME_PREKEYS) ?: ByteArray(0)
+        if (old.size / 36 + count > MAX_LOCAL_ONE_TIME_PREKEYS) { old.fill(0); return emptyList() }
+        val start = store.getString(K_OTP_NEXT_ID)?.toIntOrNull() ?: (INITIAL_ONE_TIME_PREKEYS + 1)
+        val otps = generateOneTimePrekeys(start, count.toUInt())
+        val packed = ByteArray(old.size + otps.size * 36)
+        try {
+            old.copyInto(packed)
+            otps.forEachIndexed { i, otp ->
+                val off = old.size + i * 36
+                packed[off] = (otp.keyId ushr 24).toByte()
+                packed[off + 1] = (otp.keyId ushr 16).toByte()
+                packed[off + 2] = (otp.keyId ushr 8).toByte()
+                packed[off + 3] = otp.keyId.toByte()
+                otp.privateKey.copyInto(packed, off + 4)
+            }
+            store.put(K_ONE_TIME_PREKEYS, packed)
+            store.putString(K_OTP_NEXT_ID, (start + count).toString())
+            return otps.map { OneTimePrekeyUpload(it.keyId, it.publicKey.toU8List()) }
+        } finally {
+            old.fill(0)
+            packed.fill(0)
+            otps.forEach { it.privateKey.fill(0) }
+        }
+    }
+
     fun hasKeys(): Boolean = store.get(K_IDENTITY_SIGNING)?.also { it.fill(0) } != null
 
     fun wipe() {
         listOf(
             K_IDENTITY_SIGNING, K_IDENTITY_VERIFYING, K_SIGNED_PREKEY_PRIVATE,
-            K_SIGNED_PREKEY_ID, K_ONE_TIME_PREKEYS, K_KEY_VERSION,
+            K_SIGNED_PREKEY_ID, K_ONE_TIME_PREKEYS, K_KEY_VERSION, K_OTP_NEXT_ID,
         ).forEach(store::remove)
     }
 
@@ -115,6 +146,8 @@ class KeyVault(private val store: SecureStore) {
         const val SIGNED_PREKEY_ID = 1
         const val INITIAL_ONE_TIME_PREKEYS = 100
         const val KEY_VERSION = 2
+        const val MAX_LOCAL_ONE_TIME_PREKEYS = 400
+        const val K_OTP_NEXT_ID = "e2e.otp.next"
         const val K_IDENTITY_SIGNING = "e2e.identity.signing"
         const val K_IDENTITY_VERIFYING = "e2e.identity.verifying"
         const val K_SIGNED_PREKEY_PRIVATE = "e2e.spk.private"
