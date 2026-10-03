@@ -40,6 +40,7 @@ async fn create_dm(
 
     // DMs require shared community membership (instance owner bypasses for moderation)
     if !claims.is_owner
+        && !state.config.search_all_users
         && !community_repo::shares_community(&state.db, claims.sub, target.id).await?
     {
         return Err(AppError::Forbidden);

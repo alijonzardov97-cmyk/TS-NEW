@@ -455,7 +455,7 @@ async fn handle_client_message(
                             )
                             .await
                             {
-                                Ok(false) => {
+                                Ok(false) if !state.config.search_all_users => {
                                     let _ = tx.send(ServerMessage::Error {
                                         code: "forbidden".to_string(),
                                         message: "you no longer share a community with this user"

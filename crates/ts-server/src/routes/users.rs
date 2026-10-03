@@ -36,6 +36,7 @@ async fn get_user(
 
     // Only visible if caller shares a community with the target (or is instance owner)
     if !claims.is_owner
+        && !state.config.search_all_users
         && claims.sub != user_id
         && !community_repo::shares_community(&state.db, claims.sub, user_id).await?
     {
