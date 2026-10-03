@@ -53,9 +53,7 @@
 		}
 	});
 
-	async function h
-					{t('reg.and')}
-leSubmit(e: SubmitEvent) {
+	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
 		error = '';
 
@@ -137,9 +135,7 @@ leSubmit(e: SubmitEvent) {
 				</div>
 			{/if}
 
-			<form onsubmit={h
-					{t('reg.and')}
-leSubmit} class="space-y-4">
+			<form onsubmit={handleSubmit} class="space-y-4">
 				{#if registrationMode === 'invite_only'}
 					<div>
 						<label for="invite-code" class="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
