@@ -63,7 +63,7 @@ class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
 
     private fun url(path: String) = baseUrl.newBuilder().encodedPath("/api$path").build()
 
-    private suspend fun <T> call(request: Request, parse: (String) -> T, http: OkHttpClient = client): T =
+    private suspend fun <T> call(request: Request, http: OkHttpClient = client, parse: (String) -> T): T =
         withContext(Dispatchers.IO) {
             val response: Response = try {
                 http.newCall(request).execute()
@@ -114,11 +114,11 @@ class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
         val s = session ?: throw ApiException(401, "", "")
         val token = s.accessToken() ?: throw ApiException(401, "", "")
         return try {
-            call(make(token), parse, http)
+            call(make(token), http, parse)
         } catch (e: ApiException) {
             if (e.status != 401) throw e
             val fresh = s.forceRefresh() ?: throw e
-            call(make(fresh), parse, http)
+            call(make(fresh), http, parse)
         }
     }
 
