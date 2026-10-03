@@ -20,8 +20,8 @@ use std::collections::HashMap;
 use ts_common::ws_messages::ServerMessage;
 use ts_db::models::file::FileRecord;
 use ts_db::repos::{
-    announcement_repo, audit_repo, blocked_hash_repo, file_repo, message_repo,
-    registration_invite_repo, report_repo, settings_repo, user_repo, webhook_repo,
+    audit_repo, blocked_hash_repo, file_repo, message_repo,
+    registration_invite_repo, report_repo, settings_repo, user_repo,
 };
 
 use crate::app_state::AppState;
@@ -103,18 +103,11 @@ pub fn routes() -> Router<Arc<AppState>> {
         // Reports
         .route("/admin/reports", get(list_reports))
         .route("/admin/reports/{id}/review", post(review_report))
-        // Announcements
-        .route(
-            "/admin/announcements",
-            post(create_announcement).get(list_announcements),
-        )
         // Instance settings
         .route(
             "/admin/settings",
             get(get_instance_settings).put(update_instance_settings),
         )
-        // Webhooks overview
-        .route("/admin/webhooks", get(list_all_webhooks))
 }
 
 // ── User Management (existing) ──
@@ -1269,70 +1262,6 @@ async fn review_report(
     }))
 }
 
-// ── Announcements ──
-
-async fn create_announcement(
-    State(state): State<Arc<AppState>>,
-    Extension(claims): Extension<AccessClaims>,
-    Json(req): Json<CreateAnnouncementRequest>,
-) -> Result<Json<AnnouncementResponse>, AppError> {
-    require_admin(&claims)?;
-
-    if req.title.is_empty() || req.title.len() > 200 {
-        return Err(AppError::Validation(
-            "title must be 1-200 characters".into(),
-        ));
-    }
-    if req.body.is_empty() || req.body.len() > 5000 {
-        return Err(AppError::Validation(
-            "body must be 1-5000 characters".into(),
-        ));
-    }
-
-    let id = Uuid::now_v7();
-    let ann = announcement_repo::create(&state.db, id, &req.title, &req.body, claims.sub).await?;
-
-    // Broadcast to all connected users
-    state
-        .connections
-        .broadcast_all(ServerMessage::Announcement {
-            id: ann.id,
-            title: ann.title.clone(),
-            body: ann.body.clone(),
-            created_by: ann.created_by,
-            created_at: ann.created_at.to_rfc3339(),
-        });
-
-    Ok(Json(AnnouncementResponse {
-        id: ann.id,
-        title: ann.title,
-        body: ann.body,
-        created_by: ann.created_by,
-        created_at: ann.created_at.to_rfc3339(),
-    }))
-}
-
-async fn list_announcements(
-    State(state): State<Arc<AppState>>,
-    Extension(claims): Extension<AccessClaims>,
-) -> Result<Json<Vec<AnnouncementResponse>>, AppError> {
-    require_admin(&claims)?;
-
-    let announcements = announcement_repo::list_all(&state.db).await?;
-    Ok(Json(
-        announcements
-            .iter()
-            .map(|a| AnnouncementResponse {
-                id: a.id,
-                title: a.title.clone(),
-                body: a.body.clone(),
-                created_by: a.created_by,
-                created_at: a.created_at.to_rfc3339(),
-            })
-            .collect(),
-    ))
-}
-
 // ── Instance Settings ──
 
 async fn get_instance_settings(
@@ -1424,54 +1353,4 @@ async fn update_instance_settings(
     let rows = settings_repo::list_all(&state.db).await?;
     let map: HashMap<String, String> = rows.into_iter().map(|r| (r.key, r.value)).collect();
     Ok(Json(map))
-}
-
-// ── Webhooks Overview ──
-
-#[derive(Debug, serde::Serialize)]
-struct AdminWebhookEntry {
-    id: Uuid,
-    channel_id: Uuid,
-    name: String,
-    active: bool,
-    created_by: Uuid,
-    created_at: String,
-}
-
-#[derive(Debug, serde::Serialize)]
-struct AdminWebhooksResponse {
-    webhooks: Vec<AdminWebhookEntry>,
-    total: i64,
-}
-
-async fn list_all_webhooks(
-    State(state): State<Arc<AppState>>,
-    Extension(claims): Extension<AccessClaims>,
-    Query(query): Query<AdminFilesQuery>,
-) -> Result<Json<AdminWebhooksResponse>, AppError> {
-    require_admin(&claims)?;
-
-    let per_page = query.per_page.unwrap_or(50).min(100);
-    let page = query.page.unwrap_or(1).clamp(1, 10_000);
-    let offset = (page - 1) * per_page;
-
-    let total = webhook_repo::count_all(&state.db).await?;
-    let webhooks = webhook_repo::list_all(&state.db, per_page, offset).await?;
-
-    let entries = webhooks
-        .into_iter()
-        .map(|w| AdminWebhookEntry {
-            id: w.id,
-            channel_id: w.channel_id,
-            name: w.name,
-            active: w.active,
-            created_by: w.created_by,
-            created_at: w.created_at.to_rfc3339(),
-        })
-        .collect();
-
-    Ok(Json(AdminWebhooksResponse {
-        webhooks: entries,
-        total,
-    }))
 }

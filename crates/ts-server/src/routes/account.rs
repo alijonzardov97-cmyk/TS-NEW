@@ -14,7 +14,7 @@ use ts_common::api_types::{
     UpdatePreferencesRequest, UpdateProfileRequest, UserPublic,
 };
 use ts_common::ws_messages::ServerMessage;
-use ts_db::repos::{announcement_repo, group_repo, preferences_repo, user_repo};
+use ts_db::repos::{group_repo, preferences_repo, user_repo};
 
 use crate::app_state::AppState;
 use crate::error::AppError;
@@ -45,11 +45,6 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/account/regenerate-recovery-code",
             post(regenerate_recovery_code),
         )
-        .route("/account/announcements", get(get_announcements))
-        .route(
-            "/account/announcements/{id}/dismiss",
-            post(dismiss_announcement),
-        )
 }
 
 /// Public route for serving avatar images (no auth required).
@@ -72,8 +67,8 @@ async fn authenticated_config(
         max_messages_cache: settings.max_messages_cache,
         max_pins_per_channel: settings.max_pins_per_channel,
         e2e_enabled: settings.e2e_enabled,
-        oidc_enabled: state.config.oidc_enabled(),
-        oidc_disable_password_login: state.config.oidc_disable_password_login,
+        oidc_enabled: false,
+        oidc_disable_password_login: false,
     })
 }
 
@@ -819,34 +814,6 @@ async fn update_preferences(
     Ok(Json(PreferencesResponse {
         preferences: merged,
     }))
-}
-
-async fn get_announcements(
-    State(state): State<Arc<AppState>>,
-    Extension(claims): Extension<AccessClaims>,
-) -> Result<Json<Vec<AnnouncementResponse>>, AppError> {
-    let announcements = announcement_repo::list_undismissed(&state.db, claims.sub).await?;
-    Ok(Json(
-        announcements
-            .iter()
-            .map(|a| AnnouncementResponse {
-                id: a.id,
-                title: a.title.clone(),
-                body: a.body.clone(),
-                created_by: a.created_by,
-                created_at: a.created_at.to_rfc3339(),
-            })
-            .collect(),
-    ))
-}
-
-async fn dismiss_announcement(
-    State(state): State<Arc<AppState>>,
-    Extension(claims): Extension<AccessClaims>,
-    Path(announcement_id): Path<Uuid>,
-) -> Result<(), AppError> {
-    announcement_repo::dismiss(&state.db, claims.sub, announcement_id).await?;
-    Ok(())
 }
 
 /// Validate that an avatar URL is a safe HTTP(S) or internal API path.

@@ -1,28 +1,18 @@
 pub mod account;
 pub mod admin;
-pub mod announcements;
 pub mod auth;
-pub mod bookmarks;
 pub mod channels;
 pub mod communities;
 pub mod dms;
-pub mod feedback;
 pub mod files;
-pub mod gifs;
 pub mod groups;
 pub mod health;
 pub mod keys;
-pub mod legal;
-pub mod link_preview;
 pub mod messages;
-pub mod oidc;
-pub mod polls;
 pub mod push;
-pub mod scheduled;
 pub mod sender_keys;
 pub mod totp;
 pub mod users;
-pub mod webhooks;
 
 use std::sync::Arc;
 
@@ -53,13 +43,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // Public routes (no auth required)
     let public_routes = auth_routes
         .merge(health::routes())
-        .merge(legal::routes())
         .merge(account::public_routes())
-        .merge(webhooks::public_routes())
         .merge(push::public_routes())
         .merge(communities::asset_routes())
-        .merge(groups::asset_routes())
-        .merge(oidc::public_routes());
+        .merge(groups::asset_routes());
 
     // Community-gated routes (require auth + community membership)
     let community_gated_routes = Router::new().merge(communities::gated_routes()).layer(
@@ -77,19 +64,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(files::routes())
         .merge(totp::routes())
         .merge(users::routes())
-        .merge(feedback::routes())
-        .merge(gifs::routes())
-        .merge(link_preview::routes())
         .merge(account::routes())
         .merge(admin::routes())
-        .merge(webhooks::routes())
-        .merge(polls::routes())
-        .merge(scheduled::routes())
-        .merge(bookmarks::routes())
-        .merge(announcements::routes())
         .merge(push::routes())
         .merge(communities::public_routes())
-        .merge(oidc::authenticated_routes())
         .merge(community_gated_routes)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

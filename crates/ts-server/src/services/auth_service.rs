@@ -534,13 +534,6 @@ pub async fn login(
     device_name: Option<&str>,
     ip_address: Option<&str>,
 ) -> Result<AuthResponse, AppError> {
-    // Check if password login is disabled (OIDC-only mode)
-    if state.config.oidc_disable_password_login {
-        return Err(AppError::Validation(
-            "password login is disabled, use SSO".to_string(),
-        ));
-    }
-
     // Check lockout (per account+IP and per IP) before doing any DB work
     let user_key = login_lockout_key(&req.username, ip_address);
     let ip_key = ip_lockout_key(ip_address);

@@ -6,7 +6,6 @@ use jsonwebtoken::{DecodingKey, EncodingKey};
 use sqlx::PgPool;
 
 use crate::config::Config;
-use crate::services::oidc_service::OidcService;
 use crate::services::push_service::PushService;
 use crate::ws::connection_manager::ConnectionManager;
 
@@ -43,30 +42,14 @@ pub struct AppState {
     pub push_service: Option<Arc<PushService>>,
     /// Admin-configurable instance settings (cached in memory).
     pub instance_settings: tokio::sync::RwLock<InstanceSettings>,
-    /// OIDC service (None if OIDC not configured).
-    pub oidc_service: Option<Arc<OidcService>>,
 }
 
 impl AppState {
     pub fn new(config: Config, db: PgPool, start_time: Instant) -> Result<Self> {
-        Self::build(config, db, start_time, None)
+        Self::build(config, db, start_time)
     }
 
-    pub fn with_oidc(
-        config: Config,
-        db: PgPool,
-        start_time: Instant,
-        oidc_service: Option<Arc<OidcService>>,
-    ) -> Result<Self> {
-        Self::build(config, db, start_time, oidc_service)
-    }
-
-    fn build(
-        config: Config,
-        db: PgPool,
-        start_time: Instant,
-        oidc_service: Option<Arc<OidcService>>,
-    ) -> Result<Self> {
+    fn build(config: Config, db: PgPool, start_time: Instant) -> Result<Self> {
         let private_pem = std::fs::read_to_string(&config.jwt_private_key_path)?;
         let public_pem = std::fs::read_to_string(&config.jwt_public_key_path)?;
 
@@ -119,7 +102,6 @@ impl AppState {
             suspended_users: dashmap::DashSet::new(),
             push_service,
             instance_settings: tokio::sync::RwLock::new(InstanceSettings::default()),
-            oidc_service,
         })
     }
 }
