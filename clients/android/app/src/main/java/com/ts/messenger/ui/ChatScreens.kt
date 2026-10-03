@@ -102,7 +102,16 @@ fun ConversationListScreen(
                                     text = { Text(stringResource(R.string.push_enable)) },
                                     onClick = { menuOpen = false; onEnablePush() },
                                 )
-                                else -> {}
+                                PushStatus.NoDistributor -> DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.push_no_distributor), style = MaterialTheme.typography.bodySmall) },
+                                    enabled = false,
+                                    onClick = {},
+                                )
+                                PushStatus.ServerUnsupported -> DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.push_server_unsupported), style = MaterialTheme.typography.bodySmall) },
+                                    enabled = false,
+                                    onClick = {},
+                                )
                             }
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.sign_out), color = colors.error) },
