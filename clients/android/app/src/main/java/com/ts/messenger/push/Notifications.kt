@@ -18,6 +18,18 @@ import com.ts.messenger.net.PushPayload
 object Notifications {
     private const val CHANNEL_ID = "messages_v2"
 
+    /** True while the app is on screen; the background service stays quiet then. */
+    @Volatile var appVisible = false
+
+    private val claimed = object : LinkedHashMap<String, Boolean>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>) = size > 200
+    }
+
+    /** True the first time a key is seen: the app and the background service must not both notify. */
+    fun claim(key: String): Boolean = synchronized(claimed) {
+        if (claimed.containsKey(key)) false else { claimed[key] = true; true }
+    }
+
     fun ensureChannel(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
         // The first channel ("messages") was created without an explicit sound and Android never
@@ -112,6 +124,7 @@ object Notifications {
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(publicVersion)
             .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setTimeoutAfter(60_000)
             .setAutoCancel(true)

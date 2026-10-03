@@ -116,12 +116,14 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
+        com.ts.messenger.push.Notifications.appVisible = true
         if (!vm.state.value.unlocked && AppLock.isAvailable(this)) promptUnlock()
     }
 
     /** Re-lock whenever the app leaves the foreground. */
     override fun onStop() {
         super.onStop()
+        com.ts.messenger.push.Notifications.appVisible = false
         vm.lock()
     }
 

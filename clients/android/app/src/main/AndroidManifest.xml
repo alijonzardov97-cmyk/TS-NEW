@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <!-- Android 11+ hides other apps unless declared: needed to find an installed UnifiedPush
@@ -48,6 +50,23 @@
             android:name=".call.CallService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Keeps one encrypted socket to the user's own server open, so notifications work
+             while the app is closed. -->
+        <service
+            android:name=".push.ListenService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps an end-to-end encrypted connection to a self-hosted chat server open for notifications" />
+        </service>
+
+        <receiver android:name=".push.BootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- UnifiedPush: wakes the app when the push distributor delivers a message. -->
         <service

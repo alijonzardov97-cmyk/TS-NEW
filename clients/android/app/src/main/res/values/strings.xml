@@ -130,4 +130,9 @@
     <string name="sec_home">Secure connection</string>
     <string name="sec_chat_notice">Messages and files are end-to-end encrypted: only you and your contact can read them. Compare the safety code (shield icon) to be sure it is really them.</string>
     <string name="sec_encrypted">encrypted</string>
+    <string name="bg_channel">Background connection</string>
+    <string name="bg_notification">Connected: messages arrive even when the app is closed</string>
+    <string name="bg_enable">Turn on background mode</string>
+    <string name="bg_disable">Turn off background mode</string>
+    <string name="bg_battery">Battery settings</string>
 </resources>

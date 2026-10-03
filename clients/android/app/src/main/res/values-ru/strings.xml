@@ -130,4 +130,9 @@
     <string name="sec_home">Защищённое соединение</string>
     <string name="sec_chat_notice">Сообщения и файлы защищены сквозным шифрованием: прочитать их можете только вы и собеседник. Сверьте код безопасности (значок щита), чтобы убедиться, что это именно он.</string>
     <string name="sec_encrypted">зашифровано</string>
+    <string name="bg_channel">Фоновое соединение</string>
+    <string name="bg_notification">Соединение активно: сообщения приходят, даже когда приложение закрыто</string>
+    <string name="bg_enable">Включить работу в фоне</string>
+    <string name="bg_disable">Выключить работу в фоне</string>
+    <string name="bg_battery">Настройки батареи</string>
 </resources>

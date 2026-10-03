@@ -83,6 +83,8 @@ data class UiState(
     val searchResults: List<UserPublic> = emptyList(),
     @StringRes val notice: Int? = null,
     val push: PushStatus = PushStatus.Off,
+    /** Background connection (foreground service) switched on by the user; on by default. */
+    val background: Boolean = true,
     val uploading: Boolean = false,
     val call: CallUi = CallUi(),
     val safety: SafetyInfo? = null,
@@ -152,7 +154,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 lastTone?.stop()
                 lastTone = android.media.RingtoneManager.getRingtone(app, uri)?.also { it.play() }
             }
-        } else {
+        } else if (com.ts.messenger.push.Notifications.claim(m.id)) {
             val name = _state.value.dms.firstOrNull { it.channel.id == m.channelId }?.otherUser?.displayName.orEmpty()
             com.ts.messenger.push.Notifications.showNewMessage(
                 app, com.ts.messenger.net.PushPayload("new_message", name, m.channelId),
@@ -311,6 +313,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 withTimeoutOrNull(5_000) { runCatching { PushRegistry(store).unsubscribe(a) } }
             }
             runCatching { UnifiedPush.unregister(app) }
+            com.ts.messenger.push.ListenService.stop(app)
             stopChat()
             store.wipeAll()
             FileService.wipe(app)
@@ -393,6 +396,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         sock.start()
         refreshDms()
         syncPush()
+        val on = bgEnabled()
+        _state.update { it.copy(background = on) }
+        if (on) com.ts.messenger.push.ListenService.start(getApplication<Application>())
+    }
+
+    private fun bgEnabled() = store.getString(K_BG) != "0"
+
+    /** Switches the always-on background connection (and with it, notifications when closed). */
+    fun toggleBackground() {
+        val on = !bgEnabled()
+        store.putString(K_BG, if (on) "1" else "0")
+        val app = getApplication<Application>()
+        if (on) com.ts.messenger.push.ListenService.start(app) else com.ts.messenger.push.ListenService.stop(app)
+        _state.update { it.copy(background = on) }
     }
 
     private fun stopChat() {
@@ -778,6 +795,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val K_ACCESS = "auth.access"
         const val K_REFRESH = "auth.refresh"
         const val K_USER = "auth.user"
+        const val K_BG = "bg.enabled"
         const val MAX_TEXT_CHARS = 3000
     }
 }

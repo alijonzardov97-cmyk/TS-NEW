@@ -77,8 +77,10 @@ fun ConversationListScreen(
     onDismissNotice: () -> Unit,
     onEnablePush: () -> Unit,
     onDisablePush: () -> Unit,
+    onToggleBackground: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
     Surface(modifier = Modifier.fillMaxSize(), color = colors.surface) {
         Box(modifier = Modifier.safeDrawingPadding().fillMaxSize()) {
@@ -102,17 +104,30 @@ fun ConversationListScreen(
                                     text = { Text(stringResource(R.string.push_enable)) },
                                     onClick = { menuOpen = false; onEnablePush() },
                                 )
-                                PushStatus.NoDistributor -> DropdownMenuItem(
+                                PushStatus.NoDistributor -> if (!state.background) DropdownMenuItem(
                                     text = { Text(stringResource(R.string.push_no_distributor), style = MaterialTheme.typography.bodySmall) },
                                     enabled = false,
                                     onClick = {},
                                 )
-                                PushStatus.ServerUnsupported -> DropdownMenuItem(
+                                PushStatus.ServerUnsupported -> if (!state.background) DropdownMenuItem(
                                     text = { Text(stringResource(R.string.push_server_unsupported), style = MaterialTheme.typography.bodySmall) },
                                     enabled = false,
                                     onClick = {},
                                 )
                             }
+                            DropdownMenuItem(
+                                text = { Text(stringResource(if (state.background) R.string.bg_disable else R.string.bg_enable)) },
+                                onClick = { menuOpen = false; onToggleBackground() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.bg_battery)) },
+                                onClick = {
+                                    menuOpen = false
+                                    runCatching {
+                                        ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                                    }
+                                },
+                            )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.sign_out), color = colors.error) },
                                 onClick = { menuOpen = false; onSignOut() },
@@ -148,7 +163,7 @@ fun ConversationListScreen(
                         TextButton(onClick = onDismissNotice) { Text(stringResource(R.string.ok)) }
                     }
                 }
-                if (state.push == PushStatus.NoDistributor || state.push == PushStatus.ServerUnsupported) {
+                if (!state.background && (state.push == PushStatus.NoDistributor || state.push == PushStatus.ServerUnsupported)) {
                     Text(
                         stringResource(if (state.push == PushStatus.NoDistributor) R.string.push_no_distributor else R.string.push_server_unsupported),
                         style = MaterialTheme.typography.bodySmall,
