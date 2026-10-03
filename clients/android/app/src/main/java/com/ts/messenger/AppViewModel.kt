@@ -135,6 +135,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var lockAfterCall = false
+    private var lastTone: android.media.Ringtone? = null
+
+    /**
+     * A message arrived over the live socket: play the notification sound while the app is open,
+     * or raise a system notification (metadata only) while it is locked in the background.
+     */
+    private fun notifyIncoming(m: com.ts.messenger.net.MessageDto) {
+        val sender = m.senderId ?: return
+        if (sender == _state.value.user?.id) return
+        if (m.messageType != "text" && m.messageType != "file") return
+        val app = getApplication<Application>()
+        if (_state.value.unlocked) {
+            runCatching {
+                val uri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+                lastTone?.stop()
+                lastTone = android.media.RingtoneManager.getRingtone(app, uri)?.also { it.play() }
+            }
+        } else {
+            val name = _state.value.dms.firstOrNull { it.channel.id == m.channelId }?.otherUser?.displayName.orEmpty()
+            com.ts.messenger.push.Notifications.showNewMessage(
+                app, com.ts.messenger.net.PushPayload("new_message", name, m.channelId),
+            )
+        }
+    }
 
     private fun restoreSession() {
         val url = store.getString(K_SERVER_URL)?.toHttpUrlOrNull()
@@ -342,7 +366,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     when (e) {
                         SocketEvent.Ready -> { _state.update { it.copy(connected = true) }; replenishKeys() }
                         SocketEvent.Closed -> _state.update { it.copy(connected = false) }
-                        is SocketEvent.Incoming -> runCatching { r.onIncoming(e.message) }
+                        is SocketEvent.Incoming -> {
+                            runCatching { r.onIncoming(e.message) }
+                            notifyIncoming(e.message)
+                        }
                         is SocketEvent.Sent -> r.onSent(e.id, e.channelId, e.createdAt)
                         is SocketEvent.Voice -> cm.onEvent(e.type, e.data)
                     }

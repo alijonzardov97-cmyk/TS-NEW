@@ -16,14 +16,25 @@ import com.ts.messenger.R
 import com.ts.messenger.net.PushPayload
 
 object Notifications {
-    private const val CHANNEL_ID = "messages"
+    private const val CHANNEL_ID = "messages_v2"
 
     fun ensureChannel(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
+        // The first channel ("messages") was created without an explicit sound and Android never
+        // lets an app change a channel afterwards, so a new id carries the sound and vibration.
+        nm.deleteNotificationChannel("messages")
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, context.getString(R.string.notif_channel_name), NotificationManager.IMPORTANCE_HIGH).apply {
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
                 setShowBadge(true)
+                enableVibration(true)
+                setSound(
+                    android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION),
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
             },
         )
     }
