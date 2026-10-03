@@ -150,16 +150,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             },
         ));
 
-    // CORS: restrict to known origins. Desktop client (Tauri) uses tauri://localhost.
+    // CORS: restrict to known origins. The web client is served by this server (same origin) and
+    // the Android app does not use CORS, so by default only PUBLIC_URL is allowed.
     // Override via CORS_ORIGINS env var (comma-separated).
     let cors = {
         use axum::http::{HeaderValue, Method};
         let origins_str = std::env::var("CORS_ORIGINS").unwrap_or_else(|_| {
-            // Derive from PUBLIC_URL if set, otherwise allow only Tauri desktop.
-            match std::env::var("PUBLIC_URL").ok() {
-                Some(url) if !url.is_empty() => format!("{url},tauri://localhost"),
-                _ => "tauri://localhost".to_string(),
-            }
+            std::env::var("PUBLIC_URL").ok().filter(|u| !u.is_empty()).unwrap_or_default()
         });
         let origins: Vec<HeaderValue> = origins_str
             .split(',')
