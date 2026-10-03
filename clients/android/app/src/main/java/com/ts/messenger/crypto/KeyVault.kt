@@ -57,6 +57,50 @@ class KeyVault(private val store: SecureStore) {
         }
     }
 
+    /** Identity signing key (private). The caller must zero the array after use. */
+    fun signingKey(): ByteArray? = store.get(K_IDENTITY_SIGNING)
+
+    fun verifyingKey(): ByteArray? = store.get(K_IDENTITY_VERIFYING)
+
+    /** Private half of our signed prekey, only if [id] is the one we currently hold. */
+    fun signedPrekeyPrivate(id: Int): ByteArray? =
+        if (store.getString(K_SIGNED_PREKEY_ID)?.toIntOrNull() == id) store.get(K_SIGNED_PREKEY_PRIVATE) else null
+
+    /** Reads a one-time prekey's private key without deleting it. */
+    @Synchronized
+    fun peekOneTimePrekey(id: Int): ByteArray? = scanOneTimePrekeys(id, remove = false)
+
+    /** Returns the one-time prekey's private key and deletes it: each one is single use. */
+    @Synchronized
+    fun takeOneTimePrekey(id: Int): ByteArray? = scanOneTimePrekeys(id, remove = true)
+
+    private fun scanOneTimePrekeys(id: Int, remove: Boolean): ByteArray? {
+        val packed = store.get(K_ONE_TIME_PREKEYS) ?: return null
+        try {
+            var found: ByteArray? = null
+            val keep = java.io.ByteArrayOutputStream()
+            var off = 0
+            while (off + 36 <= packed.size) {
+                val keyId = ((packed[off].toInt() and 0xFF) shl 24) or ((packed[off + 1].toInt() and 0xFF) shl 16) or
+                    ((packed[off + 2].toInt() and 0xFF) shl 8) or (packed[off + 3].toInt() and 0xFF)
+                if (keyId == id && found == null) {
+                    found = packed.copyOfRange(off + 4, off + 36)
+                } else {
+                    keep.write(packed, off, 36)
+                }
+                off += 36
+            }
+            if (remove && found != null) {
+                val remaining = keep.toByteArray()
+                store.put(K_ONE_TIME_PREKEYS, remaining)
+                remaining.fill(0)
+            }
+            return found
+        } finally {
+            packed.fill(0)
+        }
+    }
+
     fun hasKeys(): Boolean = store.get(K_IDENTITY_SIGNING)?.also { it.fill(0) } != null
 
     fun wipe() {

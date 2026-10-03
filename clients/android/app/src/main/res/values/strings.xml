@@ -63,4 +63,22 @@
     <string name="cert_changed_new">New fingerprint</string>
     <string name="cert_changed_accept">Trust the new certificate</string>
     <string name="cert_changed_reject">Do not trust</string>
+    <string name="new_chat">New chat</string>
+    <string name="no_chats">No conversations yet. Start one with the button above.</string>
+    <string name="offline_banner">Not connected. Reconnecting…</string>
+    <string name="message_hint">Message</string>
+    <string name="send">Send</string>
+    <string name="back">Back</string>
+    <string name="ok">OK</string>
+    <string name="empty_chat">No messages yet. Say hello.</string>
+    <string name="undecryptable">This message could not be decrypted.</string>
+    <string name="own_other_device">Sent from another device.</string>
+    <string name="search_users">Find a user</string>
+    <string name="search_min">Type at least 2 characters.</string>
+    <string name="no_results">Nobody found.</string>
+    <string name="notice_new_keys">This device now has its own encryption keys. Messages sent earlier to your account on another device cannot be read here.</string>
+    <string name="identity_changed_title">Security key changed</string>
+    <string name="identity_changed_body">This contact\'s security key is different from the one saved before. They may have a new device, but someone could also be intercepting the conversation. Compare the safety number with them in person or over a call you trust before continuing.</string>
+    <string name="identity_changed_accept">Trust the new key</string>
+    <string name="identity_changed_reject">Not now</string>
 </resources>

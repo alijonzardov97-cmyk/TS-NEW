@@ -4,7 +4,18 @@ import android.app.Application
 import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.ts.messenger.chat.ChatLog
+import com.ts.messenger.chat.ChatRepository
+import com.ts.messenger.chat.NotConnectedException
+import com.ts.messenger.crypto.ChatCrypto
 import com.ts.messenger.crypto.KeyVault
+import com.ts.messenger.crypto.PeerIdentityChangedException
+import com.ts.messenger.net.ChatMessage
+import com.ts.messenger.net.ChatSocket
+import com.ts.messenger.net.DmChannel
+import com.ts.messenger.net.KeyRegistrationRequest
+import com.ts.messenger.net.Session
+import com.ts.messenger.net.SocketEvent
 import com.ts.messenger.net.ApiException
 import com.ts.messenger.net.AppJson
 import com.ts.messenger.net.CertificateChangedException
@@ -19,6 +30,7 @@ import com.ts.messenger.net.UserPublic
 import com.ts.messenger.net.parseServerUrl
 import com.ts.messenger.security.SecureStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +48,8 @@ sealed interface Screen {
     data object Register : Screen
     data class Recovery(val code: String) : Screen
     data object Home : Screen
+    data object NewChat : Screen
+    data object Chat : Screen
 }
 
 /** A server whose certificate no longer matches the saved pin; waits for the user's decision. */
@@ -50,6 +64,13 @@ data class UiState(
     val config: ServerConfig? = null,
     val user: UserPublic? = null,
     val certChange: CertChange? = null,
+    val dms: List<DmChannel> = emptyList(),
+    val current: DmChannel? = null,
+    val messages: List<ChatMessage> = emptyList(),
+    val connected: Boolean = false,
+    val identityAlert: PeerIdentityChangedException? = null,
+    val searchResults: List<UserPublic> = emptyList(),
+    @StringRes val notice: Int? = null,
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -63,6 +84,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var pins: List<String> = emptyList()
     private var api: TsApi? = null
     private var restored = false
+
+    private val chatLog = ChatLog(store)
+    private var repo: ChatRepository? = null
+    private var socket: ChatSocket? = null
+    private var chatJob: Job? = null
+    private var dmIds: List<String> = emptyList()
 
     // ── App lock ──
 
@@ -99,12 +126,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (hasToken && user != null) it.copy(screen = Screen.Home, user = user)
             else it.copy(screen = Screen.Login)
         }
+        if (hasToken && user != null) startChat()
     }
 
     private fun useServer(url: HttpUrl, serverPins: List<String>) {
         baseUrl = url
         pins = serverPins
-        api = TsApi(url, HttpClientFactory.create(url.host, serverPins))
+        val a = TsApi(url, HttpClientFactory.create(url.host, serverPins))
+        a.session = Session(store) { refreshToken -> a.refresh(refreshToken) }
+        api = a
         _state.update { it.copy(serverHost = url.host) }
     }
 
@@ -158,7 +188,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         launchBusy {
             val res = client.login(LoginRequest(username.trim(), password, totp?.trim()?.ifEmpty { null }))
             saveSession(res.accessToken, res.refreshToken, res.user)
+            try {
+                ensureKeys(client)
+            } catch (e: Exception) {
+                store.remove(K_ACCESS)
+                store.remove(K_REFRESH)
+                throw e
+            }
             _state.update { it.copy(screen = Screen.Home, user = res.user) }
+            startChat()
         }
     }
 
@@ -198,6 +236,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         screen = res.recoveryCode?.let { c -> Screen.Recovery(c) } ?: Screen.Home,
                     )
                 }
+                if (res.recoveryCode == null) startChat()
             } catch (e: Exception) {
                 keyVault.wipe() // never keep keys the server does not know about
                 throw e
@@ -205,9 +244,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun recoverySaved() = _state.update { it.copy(screen = Screen.Home) }
+    fun recoverySaved() {
+        _state.update { it.copy(screen = Screen.Home) }
+        startChat()
+    }
 
     fun signOut() {
+        stopChat()
         store.wipeAll()
         api = null
         baseUrl = null
@@ -216,6 +259,174 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
+
+    // ── Chats ──
+
+    private suspend fun ensureKeys(a: com.ts.messenger.net.TsApi) {
+        if (keyVault.hasKeys()) return
+        // First sign-in on this device for an existing account: create and upload new keys.
+        val keys = withContext(Dispatchers.Default) { keyVault.generateRegistrationKeys() }
+        try {
+            a.registerKeys(KeyRegistrationRequest(keys.identityKey, keys.signedPrekey, keys.oneTimePrekeys))
+        } catch (e: Exception) {
+            keyVault.wipe()
+            throw e
+        }
+        _state.update { it.copy(notice = R.string.notice_new_keys) }
+    }
+
+    private fun startChat() {
+        val a = api ?: return
+        val url = baseUrl ?: return
+        val me = _state.value.user ?: return
+        stopChat()
+        val sock = ChatSocket(
+            HttpClientFactory.create(url.host, pins), url, viewModelScope,
+            tokenProvider = { a.session?.accessToken() },
+            channelIds = { dmIds },
+        )
+        val r = ChatRepository(a, ChatCrypto(store, keyVault), chatLog, sock, me.id)
+        repo = r
+        socket = sock
+        chatJob = viewModelScope.launch {
+            launch {
+                // Sequential on purpose: incoming messages are decrypted in arrival order.
+                sock.events.collect { e ->
+                    when (e) {
+                        SocketEvent.Ready -> _state.update { it.copy(connected = true) }
+                        SocketEvent.Closed -> _state.update { it.copy(connected = false) }
+                        is SocketEvent.Incoming -> runCatching { r.onIncoming(e.message) }
+                        is SocketEvent.Sent -> r.onSent(e.id, e.channelId, e.createdAt)
+                    }
+                }
+            }
+            launch {
+                r.changed.collect { ch ->
+                    if (_state.value.current?.channel?.id == ch) {
+                        _state.update { it.copy(messages = r.cached(ch)) }
+                    }
+                }
+            }
+            launch { r.identityAlerts.collect { al -> _state.update { it.copy(identityAlert = al) } } }
+        }
+        sock.start()
+        refreshDms()
+    }
+
+    private fun stopChat() {
+        chatJob?.cancel()
+        chatJob = null
+        socket?.stop()
+        socket = null
+        repo = null
+        dmIds = emptyList()
+    }
+
+    fun refreshDms() {
+        val a = api ?: return
+        viewModelScope.launch {
+            try {
+                val dms = a.listDms()
+                repo?.registerDms(dms)
+                dmIds = dms.map { it.channel.id }
+                socket?.let { s -> dms.forEach { s.subscribe(it.channel.id) } }
+                _state.update { it.copy(dms = dms) }
+            } catch (e: CertificateChangedException) {
+                presentCertChange()
+            } catch (_: Exception) {
+                // Transient (offline); the list keeps what it had.
+            }
+        }
+    }
+
+    fun openChat(dm: DmChannel) {
+        val r = repo ?: return
+        _state.update { it.copy(screen = Screen.Chat, current = dm, messages = r.cached(dm.channel.id), error = null) }
+        viewModelScope.launch {
+            try {
+                r.loadHistory(dm)
+            } catch (e: CertificateChangedException) {
+                presentCertChange()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = errorRes(e)) }
+            }
+        }
+    }
+
+    fun closeChat() {
+        _state.update { it.copy(screen = Screen.Home, current = null, messages = emptyList(), error = null) }
+        refreshDms()
+    }
+
+    fun sendMessage(text: String) {
+        val dm = _state.value.current ?: return
+        val r = repo ?: return
+        val t = text.trim()
+        if (t.isEmpty() || t.length > MAX_TEXT_CHARS) return
+        viewModelScope.launch {
+            try {
+                r.send(dm, t)
+            } catch (e: PeerIdentityChangedException) {
+                _state.update { it.copy(identityAlert = e) }
+            } catch (e: NotConnectedException) {
+                _state.update { it.copy(error = R.string.error_network) }
+            } catch (e: CertificateChangedException) {
+                presentCertChange()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = errorRes(e)) }
+            }
+        }
+    }
+
+    fun acceptIdentity() {
+        val alert = _state.value.identityAlert ?: return
+        val r = repo ?: return
+        viewModelScope.launch {
+            r.acceptIdentity(alert)
+            _state.update { it.copy(identityAlert = null) }
+            _state.value.current?.let { runCatching { r.loadHistory(it) } }
+        }
+    }
+
+    fun dismissIdentityAlert() = _state.update { it.copy(identityAlert = null) }
+
+    fun dismissNotice() = _state.update { it.copy(notice = null) }
+
+    fun openNewChat() = _state.update { it.copy(screen = Screen.NewChat, searchResults = emptyList(), error = null) }
+
+    fun leaveNewChat() = _state.update { it.copy(screen = Screen.Home, searchResults = emptyList(), error = null) }
+
+    fun search(query: String) {
+        val a = api ?: return
+        val q = query.trim()
+        if (q.length < 2) {
+            _state.update { it.copy(searchResults = emptyList()) }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val me = _state.value.user?.id
+                val found = a.searchUsers(q).filter { it.id != me }
+                _state.update { it.copy(searchResults = found, error = null) }
+            } catch (e: CertificateChangedException) {
+                presentCertChange()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = errorRes(e)) }
+            }
+        }
+    }
+
+    fun startChatWith(user: UserPublic) {
+        val a = api ?: return
+        launchBusy {
+            val dm = a.createDm(user.id)
+            repo?.registerDms(listOf(dm))
+            dmIds = (dmIds + dm.channel.id).distinct()
+            socket?.subscribe(dm.channel.id)
+            openChat(dm)
+            refreshDms()
+        }
+    }
 
     // ── helpers ──
 
@@ -253,6 +464,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.putString(K_SERVER_PINS, AppJson.encodeToString(change.probe.pins))
         useServer(url, change.probe.pins)
         _state.update { it.copy(certChange = null, error = null) }
+        if (_state.value.user != null) startChat()
     }
 
     fun rejectCertChange() = _state.update { it.copy(certChange = null) }
@@ -298,5 +510,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val K_ACCESS = "auth.access"
         const val K_REFRESH = "auth.refresh"
         const val K_USER = "auth.user"
+        const val MAX_TEXT_CHARS = 3000
     }
 }

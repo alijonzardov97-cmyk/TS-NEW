@@ -173,7 +173,12 @@ fun AppContent(
         Screen.Login -> LoginScreen(state, vm::login, { vm.goTo(Screen.Register) }, vm::changeServer)
         Screen.Register -> RegisterScreen(state, vm::register, { vm.goTo(Screen.Login) })
         is Screen.Recovery -> RecoveryScreen(s.code, vm::recoverySaved)
-        Screen.Home -> HomeScreen(state, vm::signOut)
+        Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice)
+        Screen.NewChat -> NewChatScreen(state, vm::search, vm::startChatWith, vm::leaveNewChat)
+        Screen.Chat -> ChatScreen(state, vm::closeChat, vm::sendMessage)
+    }
+    state.identityAlert?.let { alert ->
+        IdentityChangedDialog(alert, vm::acceptIdentity, vm::dismissIdentityAlert)
     }
     state.certChange?.let { change ->
         CertChangedDialog(change, vm::acceptCertChange, vm::rejectCertChange)

@@ -95,6 +95,62 @@ class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
             AppJson.decodeFromString(it)
         }
 
+    // ── Authenticated calls (bearer token, one transparent refresh on 401) ──
+
+    /** Set by the app once a session exists. */
+    var session: Session? = null
+
+    private suspend fun <T> authed(make: (token: String) -> Request, parse: (String) -> T): T {
+        val s = session ?: throw ApiException(401, "", "")
+        val token = s.accessToken() ?: throw ApiException(401, "", "")
+        return try {
+            call(make(token), parse)
+        } catch (e: ApiException) {
+            if (e.status != 401) throw e
+            val fresh = s.forceRefresh() ?: throw e
+            call(make(fresh), parse)
+        }
+    }
+
+    private fun bearer(url: HttpUrl, token: String) =
+        Request.Builder().url(url).header("Authorization", "Bearer $token")
+
+    private fun checkedId(id: String): String {
+        require(id.matches(Regex("[0-9a-fA-F-]{36}"))) { "bad id" }
+        return id
+    }
+
+    suspend fun listDms(): List<DmChannel> =
+        authed({ bearer(url("/dms"), it).get().build() }) { AppJson.decodeFromString(it) }
+
+    suspend fun createDm(userId: String): DmChannel =
+        authed({
+            bearer(url("/dms"), it)
+                .post(AppJson.encodeToString(CreateDmRequest(checkedId(userId))).toRequestBody(JSON_MEDIA)).build()
+        }) { AppJson.decodeFromString(it) }
+
+    suspend fun messages(channelId: String, limit: Int = 50): List<MessageDto> =
+        authed({
+            val u = url("/channels/${checkedId(channelId)}/messages").newBuilder()
+                .addQueryParameter("limit", limit.toString()).build()
+            bearer(u, it).get().build()
+        }) { AppJson.decodeFromString(it) }
+
+    suspend fun keyBundle(userId: String): KeyBundle =
+        authed({ bearer(url("/keys/${checkedId(userId)}/bundle"), it).get().build() }) { AppJson.decodeFromString(it) }
+
+    suspend fun registerKeys(req: KeyRegistrationRequest) =
+        authed({
+            bearer(url("/keys/register"), it)
+                .post(AppJson.encodeToString(req).toRequestBody(JSON_MEDIA)).build()
+        }) { }
+
+    suspend fun searchUsers(query: String): List<UserPublic> =
+        authed({
+            val u = url("/users/search").newBuilder().addQueryParameter("q", query).build()
+            bearer(u, it).get().build()
+        }) { AppJson.decodeFromString(it) }
+
     private fun post(path: String, json: String) =
         Request.Builder().url(url(path)).post(json.toRequestBody(JSON_MEDIA)).build()
 

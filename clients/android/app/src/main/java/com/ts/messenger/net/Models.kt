@@ -85,3 +85,95 @@ data class ErrorEnvelope(val error: ErrorBody? = null)
 
 @Serializable
 data class ErrorBody(val code: String = "", val message: String = "")
+
+// ── Conversations, keys and messages ──
+
+@Serializable
+data class ChannelInfo(
+    val id: String,
+    val name: String? = null,
+    @SerialName("channel_type") val channelType: String = "dm",
+)
+
+@Serializable
+data class DmChannel(
+    val channel: ChannelInfo,
+    @SerialName("other_user") val otherUser: UserPublic,
+)
+
+@Serializable
+data class CreateDmRequest(@SerialName("target_user_id") val targetUserId: String)
+
+@Serializable
+data class SignedPrekeyBundle(
+    @SerialName("key_id") val keyId: Int,
+    @SerialName("public_key") val publicKey: List<Int>,
+    val signature: List<Int>,
+)
+
+@Serializable
+data class OneTimePrekeyBundle(
+    @SerialName("key_id") val keyId: Int,
+    @SerialName("public_key") val publicKey: List<Int>,
+)
+
+@Serializable
+data class KeyBundle(
+    @SerialName("identity_key") val identityKey: List<Int>,
+    @SerialName("signed_prekey") val signedPrekey: SignedPrekeyBundle,
+    @SerialName("one_time_prekey") val oneTimePrekey: OneTimePrekeyBundle? = null,
+)
+
+@Serializable
+data class KeyRegistrationRequest(
+    @SerialName("identity_key") val identityKey: List<Int>,
+    @SerialName("signed_prekey") val signedPrekey: SignedPrekeyUpload,
+    @SerialName("one_time_prekeys") val oneTimePrekeys: List<OneTimePrekeyUpload>,
+)
+
+@Serializable
+data class MessageDto(
+    val id: String,
+    @SerialName("channel_id") val channelId: String,
+    @SerialName("sender_id") val senderId: String? = null,
+    val ciphertext: List<Int>,
+    val nonce: List<Int>,
+    @SerialName("message_type") val messageType: String = "text",
+    @SerialName("created_at") val createdAt: String,
+)
+
+/** Decrypted message as kept in the local encrypted chat log. */
+@Serializable
+data class ChatMessage(
+    val id: String,
+    @SerialName("sender_id") val senderId: String,
+    val text: String,
+    @SerialName("created_at") val createdAt: String,
+    /** False when the message could not be decrypted (text then holds a placeholder). */
+    val ok: Boolean = true,
+)
+
+/** Wire format of an encrypted 1:1 message; identical to the web client's `WireMessage`. */
+@Serializable
+data class WireX3dh(
+    @SerialName("identity_key") val identityKey: List<Int>,
+    @SerialName("ephemeral_key") val ephemeralKey: List<Int>,
+    @SerialName("signed_prekey_id") val signedPrekeyId: Int,
+    @SerialName("one_time_prekey_id") val oneTimePrekeyId: Int? = null,
+)
+
+@Serializable
+data class WireHeader(
+    @SerialName("ratchet_key") val ratchetKey: List<Int>,
+    @SerialName("previous_chain_length") val previousChainLength: Long,
+    @SerialName("message_number") val messageNumber: Long,
+)
+
+@Serializable
+data class WireMessage(
+    val v: Int = 1,
+    val x3dh: WireX3dh? = null,
+    val header: WireHeader,
+    val ciphertext: List<Int>,
+    val nonce: List<Int>,
+)

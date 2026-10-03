@@ -63,4 +63,22 @@
     <string name="cert_changed_new">Новый отпечаток</string>
     <string name="cert_changed_accept">Доверять новому сертификату</string>
     <string name="cert_changed_reject">Не доверять</string>
+    <string name="new_chat">Новый чат</string>
+    <string name="no_chats">Пока нет переписок. Начните новую кнопкой выше.</string>
+    <string name="offline_banner">Нет соединения. Подключаюсь…</string>
+    <string name="message_hint">Сообщение</string>
+    <string name="send">Отправить</string>
+    <string name="back">Назад</string>
+    <string name="ok">Понятно</string>
+    <string name="empty_chat">Сообщений пока нет. Напишите первым.</string>
+    <string name="undecryptable">Не удалось расшифровать сообщение.</string>
+    <string name="own_other_device">Отправлено с другого устройства.</string>
+    <string name="search_users">Найти пользователя</string>
+    <string name="search_min">Введите не менее 2 символов.</string>
+    <string name="no_results">Никого не найдено.</string>
+    <string name="notice_new_keys">У этого устройства теперь свои ключи шифрования. Сообщения, отправленные раньше на ваш аккаунт на другом устройстве, здесь не прочитать.</string>
+    <string name="identity_changed_title">Ключ безопасности изменился</string>
+    <string name="identity_changed_body">Ключ безопасности собеседника отличается от сохранённого. Возможно, у него новое устройство, но так же может выглядеть и перехват переписки. Сверьте код безопасности лично или по надёжному звонку, прежде чем продолжать.</string>
+    <string name="identity_changed_accept">Доверять новому ключу</string>
+    <string name="identity_changed_reject">Не сейчас</string>
 </resources>
