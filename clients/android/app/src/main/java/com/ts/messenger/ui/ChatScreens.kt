@@ -81,9 +81,7 @@ fun ConversationListScreen(
         state.dms.forEach { dm ->
             Card(modifier = Modifier.fillMaxWidth().clickable { onOpen(dm) }) {
                 Column(modifier = Modifier.padding(16.dp).heightIn(min = 40.dp)) {
-                    Text(dm.otherUser.displayName, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = onSafety) { Text(stringResource(R.string.safety_button)) }
-                TextButton(onClick = onCall, enabled = state.connected) { Text(stringResource(R.string.call_button)) }
+                    Text(dm.otherUser.displayName, style = MaterialTheme.typography.titleMedium)
                     Text("@${dm.otherUser.username}", style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -160,7 +158,9 @@ fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
-                Text(dm.otherUser.displayName, style = MaterialTheme.typography.titleMedium)
+                Text(dm.otherUser.displayName, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = onSafety) { Text(stringResource(R.string.safety_button)) }
+                TextButton(onClick = onCall, enabled = state.connected) { Text(stringResource(R.string.call_button)) }
             }
             if (!state.connected) {
                 Text(

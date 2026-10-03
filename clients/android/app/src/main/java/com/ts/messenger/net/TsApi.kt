@@ -52,12 +52,21 @@ fun parseServerUrl(input: String): HttpUrl? {
  */
 class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
 
+    /** Large transfers: no overall call limit, generous per-read/write limits. */
+    private val bulkClient by lazy {
+        client.newBuilder()
+            .callTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
     private fun url(path: String) = baseUrl.newBuilder().encodedPath("/api$path").build()
 
-    private suspend fun <T> call(request: Request, parse: (String) -> T): T =
+    private suspend fun <T> call(request: Request, parse: (String) -> T, http: OkHttpClient = client): T =
         withContext(Dispatchers.IO) {
             val response: Response = try {
-                client.newCall(request).execute()
+                http.newCall(request).execute()
             } catch (e: SSLPeerUnverifiedException) {
                 throw CertificateChangedException()
             } catch (e: IOException) {
@@ -101,15 +110,15 @@ class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
     /** Set by the app once a session exists. */
     var session: Session? = null
 
-    private suspend fun <T> authed(make: (token: String) -> Request, parse: (String) -> T): T {
+    private suspend fun <T> authed(make: (token: String) -> Request, http: OkHttpClient = client, parse: (String) -> T): T {
         val s = session ?: throw ApiException(401, "", "")
         val token = s.accessToken() ?: throw ApiException(401, "", "")
         return try {
-            call(make(token), parse)
+            call(make(token), parse, http)
         } catch (e: ApiException) {
             if (e.status != 401) throw e
             val fresh = s.forceRefresh() ?: throw e
-            call(make(fresh), parse)
+            call(make(fresh), parse, http)
         }
     }
 
@@ -196,14 +205,18 @@ class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
                 .addFormDataPart("file", "blob", blob.asRequestBody("application/octet-stream".toMediaType()))
                 .build()
             bearer(url("/files/upload"), it).post(body).build()
-        }) { AppJson.decodeFromString(it) }
+        }, bulkClient) { AppJson.decodeFromString(it) }
+
+    /** Best effort removal of one of our own uploads. */
+    suspend fun deleteFile(fileId: String) =
+        authed({ bearer(url("/files/${checkedId(fileId)}"), it).delete().build() }) { }
 
     /** Streams a stored blob to [dest]; fails if it grows beyond [maxBytes]. */
     suspend fun downloadFile(fileId: String, dest: java.io.File, maxBytes: Long) {
         val s = session ?: throw ApiException(401, "", "")
         suspend fun once(token: String) = withContext(Dispatchers.IO) {
             val response = try {
-                client.newCall(bearer(url("/files/${checkedId(fileId)}"), token).get().build()).execute()
+                bulkClient.newCall(bearer(url("/files/${checkedId(fileId)}"), token).get().build()).execute()
             } catch (e: SSLPeerUnverifiedException) {
                 throw CertificateChangedException()
             } catch (e: IOException) {

@@ -132,6 +132,27 @@ class KeyVault(private val store: SecureStore) {
         }
     }
 
+    /** Drops freshly generated prekeys whose upload failed, so failures cannot fill the store. */
+    @Synchronized
+    fun discardOneTimePrekeys(ids: Set<Int>) {
+        val packed = store.get(K_ONE_TIME_PREKEYS) ?: return
+        try {
+            val keep = java.io.ByteArrayOutputStream()
+            var off = 0
+            while (off + 36 <= packed.size) {
+                val keyId = ((packed[off].toInt() and 0xFF) shl 24) or ((packed[off + 1].toInt() and 0xFF) shl 16) or
+                    ((packed[off + 2].toInt() and 0xFF) shl 8) or (packed[off + 3].toInt() and 0xFF)
+                if (keyId !in ids) keep.write(packed, off, 36)
+                off += 36
+            }
+            val remaining = keep.toByteArray()
+            store.put(K_ONE_TIME_PREKEYS, remaining)
+            remaining.fill(0)
+        } finally {
+            packed.fill(0)
+        }
+    }
+
     fun hasKeys(): Boolean = store.get(K_IDENTITY_SIGNING)?.also { it.fill(0) } != null
 
     fun wipe() {

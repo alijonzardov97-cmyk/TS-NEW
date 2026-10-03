@@ -62,8 +62,13 @@ class ChatRepository(
         crypto.exclusive {
             if (!socket.isReady) throw NotConnectedException()
             val payload = crypto.encrypt(peerId, text) { api.keyBundle(peerId) }
-            if (!socket.sendMessage(channelId, payload.ciphertext, payload.nonce)) throw NotConnectedException()
-            synchronized(pending) { pending.addLast(Pending(channelId, text)) }
+            val entry = Pending(channelId, text)
+            // Registered before sending: the server's confirmation can arrive immediately.
+            synchronized(pending) { pending.addLast(entry) }
+            if (!socket.sendMessage(channelId, payload.ciphertext, payload.nonce)) {
+                synchronized(pending) { pending.remove(entry) }
+                throw NotConnectedException()
+            }
         }
     }
 
@@ -80,11 +85,17 @@ class ChatRepository(
             crypto.exclusive {
                 if (!socket.isReady) throw NotConnectedException()
                 val payload = crypto.encrypt(peerId, text) { api.keyBundle(peerId) }
-                if (!socket.sendMessage(channelId, payload.ciphertext, payload.nonce, "file")) throw NotConnectedException()
-                synchronized(pending) { pending.addLast(Pending(channelId, ref.name, ref)) }
+                val entry = Pending(channelId, ref.name, ref)
+                synchronized(pending) { pending.addLast(entry) }
+                if (!socket.sendMessage(channelId, payload.ciphertext, payload.nonce, "file")) {
+                    synchronized(pending) { pending.remove(entry) }
+                    throw NotConnectedException()
+                }
             }
         } catch (e: Throwable) {
             files.discard(ref.id)
+            // Do not leave an orphaned ciphertext (and its quota) on the server.
+            runCatching { api.deleteFile(ref.id) }
             throw e
         }
     }

@@ -47,10 +47,11 @@ class FileService(context: Context, private val api: TsApi) {
         }
         val mime = resolver.getType(uri) ?: "application/octet-stream"
         name = sanitizeName(name)
-        if (mime == "image/jpeg" || mime == "image/png" || mime == "image/webp") {
+        if (mime.startsWith("image/") && mime != "image/gif" && mime != "image/svg+xml") {
             val png = mime == "image/png"
             val clean = stripImage(uri, png)
-            val outName = if (mime == "image/webp") name.substringBeforeLast('.', name) + ".jpg" else name
+            val outName = if (mime == "image/jpeg" || mime == "image/png") name
+            else name.substringBeforeLast('.', name) + if (png) ".png" else ".jpg"
             return@withContext Picked(outName, if (png) "image/png" else "image/jpeg", clean.size.toLong()) {
                 ByteArrayInputStream(clean)
             }
@@ -99,7 +100,11 @@ class FileService(context: Context, private val api: TsApi) {
                 tmp.outputStream().buffered().use { out -> FileCrypto.encrypt(key, input, out, MAX_FILE_BYTES) }
             }
             val id = api.uploadEncrypted(channelId, tmp).id
-            if (!ID.matches(id) || !tmp.renameTo(blob(id))) throw IOException("store failed")
+            if (!ID.matches(id)) throw IOException("bad id")
+            if (!tmp.renameTo(blob(id))) {
+                runCatching { api.deleteFile(id) }
+                throw IOException("store failed")
+            }
             FileRef(id, p.name, plain, p.mime, Base64.getUrlEncoder().withoutPadding().encodeToString(key))
         } catch (e: Throwable) {
             tmp.delete()
@@ -145,7 +150,13 @@ class FileService(context: Context, private val api: TsApi) {
 
     suspend fun saveTo(ref: FileRef, uri: Uri) = withContext(Dispatchers.IO) {
         val out = resolver.openOutputStream(uri, "w") ?: throw IOException("cannot open")
-        out.use { decryptTo(ref, it) }
+        try {
+            out.use { decryptTo(ref, it) }
+        } catch (e: Throwable) {
+            // Never leave a partly decrypted (possibly tampered) file behind.
+            runCatching { android.provider.DocumentsContract.deleteDocument(resolver, uri) }
+            throw e
+        }
     }
 
     /** A down-sampled bitmap for inline display, or null. */

@@ -101,6 +101,10 @@ async fn upload_file(
     }
 
     let data = file_data.ok_or_else(|| AppError::Validation("no file field".to_string()))?;
+    // An opaque blob without a channel would have no access control beyond its uploader.
+    if encrypted_blob && channel_id.is_none() {
+        return Err(AppError::Validation("encrypted uploads require a valid channel_id".to_string()));
+    }
 
     // Rate limiting: max 10 uploads per minute per user
     {

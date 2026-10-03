@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.ts.messenger.chat.ChatLog
 import com.ts.messenger.chat.ChatRepository
 import com.ts.messenger.call.CallManager
+import com.ts.messenger.call.CallPhase
 import com.ts.messenger.call.CallUi
 import com.ts.messenger.files.FileService
 import com.ts.messenger.files.FileTooLargeException
@@ -128,8 +129,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Called when the app goes to the background: everything is hidden again. */
     fun lock() {
+        // During a call only the call screen is reachable; the app locks as soon as it ends.
+        if (_state.value.call.phase != CallPhase.Idle) { lockAfterCall = true; return }
         _state.update { it.copy(unlocked = false) }
     }
+
+    private var lockAfterCall = false
 
     private fun restoreSession() {
         val url = store.getString(K_SERVER_URL)?.toHttpUrlOrNull()
@@ -350,7 +355,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             }
-            launch { cm.ui.collect { c -> _state.update { it.copy(call = c) } } }
+            launch {
+                cm.ui.collect { c ->
+                    _state.update { it.copy(call = c) }
+                    if (c.phase == CallPhase.Idle && lockAfterCall) { lockAfterCall = false; _state.update { it.copy(unlocked = false) } }
+                }
+            }
             launch { r.identityAlerts.collect { al -> _state.update { it.copy(identityAlert = al) } } }
         }
         sock.start()
@@ -361,7 +371,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun stopChat() {
         calls?.shutdown()
         calls = null
-        keysChecked = false
         chatJob?.cancel()
         chatJob = null
         socket?.stop()
@@ -506,7 +515,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: FileTooLargeException) {
                 _state.update { it.copy(error = R.string.error_file_too_large) }
             } catch (e: ApiException) {
-                _state.update { it.copy(error = if (e.status == 413) R.string.error_file_too_large else errorRes(e)) }
+                _state.update {
+                    val m = e.message.orEmpty()
+                    it.copy(error = if (e.status == 413 || m.contains("too large", true) || m.contains("quota", true)) R.string.error_file_too_large else errorRes(e))
+                }
             } catch (e: NetworkException) {
                 _state.update { it.copy(error = R.string.error_network) }
             } catch (e: Exception) {
@@ -539,22 +551,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private var keysChecked = false
+    private var keysChecking = false
 
     /** Keeps the server stocked with one-time prekeys so new chats can always start. */
     private fun replenishKeys() {
         val a = api ?: return
-        if (keysChecked) return
-        keysChecked = true
+        if (keysChecking) return
+        keysChecking = true
         viewModelScope.launch {
             try {
                 if (!keyVault.hasKeys()) return@launch
                 if (a.prekeyCount() < 20) {
                     val fresh = withContext(Dispatchers.Default) { keyVault.generateMoreOneTimePrekeys(80) }
-                    if (fresh.isNotEmpty()) a.uploadOneTimePrekeys(fresh)
+                    if (fresh.isNotEmpty()) {
+                        try {
+                            a.uploadOneTimePrekeys(fresh)
+                        } catch (e: Exception) {
+                            keyVault.discardOneTimePrekeys(fresh.map { it.keyId }.toSet())
+                            throw e
+                        }
+                    }
                 }
             } catch (_: Exception) {
-                keysChecked = false // try again at the next connection
+                // retried at the next connection
+            } finally {
+                keysChecking = false
             }
         }
     }

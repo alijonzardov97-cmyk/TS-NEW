@@ -145,6 +145,15 @@ class CallManager(
         val (peer, name) = peerOf(channelId) ?: return
         peerId = peer
         _ui.value = CallUi(CallPhase.Ringing, channelId, name)
+        startRingTimeout()
+    }
+
+    private fun startRingTimeout() {
+        timeout?.cancel()
+        timeout = scope.launch {
+            delay(60_000)
+            if (phase == CallPhase.Ringing) { Notifications.cancelCall(context); _ui.value = CallUi() }
+        }
     }
 
     // ── Server events ──
@@ -161,6 +170,7 @@ class CallManager(
                     CallPhase.Idle -> {
                         peerId = peer
                         _ui.value = CallUi(CallPhase.Ringing, ch, name)
+                        startRingTimeout()
                         Notifications.showIncomingCall(context, name, ch)
                     }
                     CallPhase.Calling -> if (ch == _ui.value.channelId) { peerSeen = true; setPhase(CallPhase.Connecting) }
@@ -247,6 +257,7 @@ class CallManager(
                 p.setLocalDescription(object : Sdp() {
                     override fun onSetSuccess() {
                         scope.launch {
+                            if (pc !== p) return@launch
                             sendSignal("rtc_offer", sdpJson("offer", d.description))
                             maybeSas()
                         }
@@ -266,6 +277,7 @@ class CallManager(
         p.setRemoteDescription(object : Sdp() {
             override fun onSetSuccess() {
                 scope.launch {
+                    if (pc !== p) return@launch
                     remoteSet = true
                     flushIce(p)
                     p.createAnswer(object : Sdp() {
@@ -273,6 +285,7 @@ class CallManager(
                             p.setLocalDescription(object : Sdp() {
                                 override fun onSetSuccess() {
                                     scope.launch {
+                                        if (pc !== p) return@launch
                                         sendSignal("rtc_answer", sdpJson("answer", d.description), theirSession)
                                         maybeSas()
                                     }
@@ -290,10 +303,11 @@ class CallManager(
 
     private fun handleAnswer(data: JsonObject) {
         val p = pc ?: return
+        if (data.str("session_id") != sessionId) return
         val sdp = parseSdp(data.str("sdp"), "answer") ?: return
         p.setRemoteDescription(object : Sdp() {
             override fun onSetSuccess() {
-                scope.launch { remoteSet = true; flushIce(p); maybeSas() }
+                scope.launch { if (pc !== p) return@launch; remoteSet = true; flushIce(p); maybeSas() }
             }
             override fun onSetFailure(e: String?) { scope.launch { finish(R.string.call_failed, true) } }
         }, SessionDescription(SessionDescription.Type.ANSWER, sdp))
@@ -351,7 +365,10 @@ class CallManager(
 
     // ── Helpers ──
 
-    private fun setPhase(p: CallPhase) { _ui.value = _ui.value.copy(phase = p) }
+    private fun setPhase(p: CallPhase) {
+        _ui.value = _ui.value.copy(phase = p)
+        if (p == CallPhase.Connecting) startTimeout(30_000, R.string.call_failed)
+    }
 
     private fun startTimeout(ms: Long, @StringRes notice: Int) {
         timeout?.cancel()
@@ -366,14 +383,19 @@ class CallManager(
         val local = fingerprint(p.localDescription?.description) ?: return
         val remote = fingerprint(p.remoteDescription?.description) ?: return
         val d = MessageDigest.getInstance("SHA-256").digest(listOf(local, remote).sorted().joinToString("|").toByteArray())
-        var v = 0L
-        for (i in 0 until 5) v = (v shl 8) or (d[i].toLong() and 0xff)
-        val digits = (v % 1_000_000_000_000L).toString().padStart(12, '0')
+        // 72 bits -> 20 decimal digits: too much to grind for an attacker who must pick its
+        // certificates before the two people compare the code.
+        val v = java.math.BigInteger(1, d.copyOfRange(0, 9)).mod(java.math.BigInteger.TEN.pow(20))
+        val digits = v.toString().padStart(20, '0')
         _ui.value = _ui.value.copy(sas = digits.chunked(4).joinToString(" "))
     }
 
-    private fun fingerprint(sdp: String?): String? =
-        sdp?.let { FP.find(it)?.groupValues?.get(1)?.uppercase() }
+    /** The one DTLS fingerprint of an SDP; null if there is none or if the lines disagree. */
+    private fun fingerprint(sdp: String?): String? {
+        if (sdp == null) return null
+        val all = FP.findAll(sdp).map { it.groupValues[1].uppercase() }.toSet()
+        return all.singleOrNull()
+    }
 
     private fun sdpJson(type: String, sdp: String) =
         buildJsonObject { put("type", type); put("sdp", sdp) }.toString()
@@ -382,7 +404,12 @@ class CallManager(
         if (raw == null || raw.length > 32_768) return null
         val o = runCatching { com.ts.messenger.net.AppJson.parseToJsonElement(raw).jsonObject }.getOrNull() ?: return null
         if (o.str("type") != expected) return null
-        return o.str("sdp")?.takeIf { it.isNotEmpty() }
+        val sdp = o.str("sdp")?.takeIf { it.isNotEmpty() } ?: return null
+        // Media must be bound to exactly one SHA-256 DTLS fingerprint, otherwise the verification
+        // code could be made to describe a different certificate than the one DTLS uses.
+        if (fingerprint(sdp) == null || Regex("a=fingerprint:", RegexOption.IGNORE_CASE).findAll(sdp).count() !=
+            FP.findAll(sdp).count()) return null
+        return sdp
     }
 
     private fun sendSignal(type: String, payload: String, session: String? = null, field: String = "sdp") {
@@ -445,7 +472,7 @@ class CallManager(
 
     private companion object {
         val ACTIVE_PHASES = setOf(CallPhase.Calling, CallPhase.Connecting, CallPhase.Active)
-        val FP = Regex("a=fingerprint:\\S+ ([0-9A-Fa-f:]+)")
+        val FP = Regex("a=fingerprint:sha-256 ([0-9A-Fa-f:]+)", RegexOption.IGNORE_CASE)
 
         @Volatile private var factory: PeerConnectionFactory? = null
 
