@@ -1,0 +1,229 @@
+services:
+  ts:
+    build: .
+    container_name: ts-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://ts:${DB_PASSWORD}@postgres:5432/ts
+      JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+      # SECURITY: TOTP_ENCRYPTION_KEY should be populated from a secret file in
+      # production (e.g. read from /run/secrets/totp_encryption_key at startup).
+      # See the totp_encryption_key secret definition below.
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-}
+      RUST_LOG: "${RUST_LOG:-ts_server=info,tower_http=info}"
+      FILE_STORAGE_PATH: /app/data/files
+      MAX_FILE_SIZE_MB: "100"
+      LISTEN_ADDR: "0.0.0.0:8080"
+      STATIC_FILES_PATH: /app/static
+      REGISTRATION_MODE: ${REGISTRATION_MODE:-invite_only}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      GITHUB_API_TOKEN: ${GITHUB_API_TOKEN:-}
+      GITHUB_REPO_OWNER: ${GITHUB_REPO_OWNER:-}
+      GITHUB_REPO_NAME: ${GITHUB_REPO_NAME:-}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      COMMUNITY_CREATION_MODE: ${COMMUNITY_CREATION_MODE:-admin_only}
+      GIPHY_API_KEY: ${GIPHY_API_KEY:-}
+      ICE_SERVERS: ${ICE_SERVERS:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      # OIDC/SSO — uncomment and configure to enable single sign-on
+      # OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}         # OIDC provider discovery URL
+      # OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}            # Client ID from your IdP
+      # OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}    # Client secret from your IdP
+      # OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}      # e.g. https://chat.example.com/auth/oidc/callback
+      # OIDC_DISABLE_PASSWORD_LOGIN: ${OIDC_DISABLE_PASSWORD_LOGIN:-false}
+    volumes:
+      - file_storage:/app/data/files
+    secrets:
+      - jwt_private_key
+      - jwt_public_key
+      - totp_encryption_key
+      - db_password
+    networks:
+      - external
+      - internal
+    ports:
+      - "8080:8080"
+    # Security hardening
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  postgres:
+    image: postgres:17
+    container_name: ts-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ts
+      POSTGRES_USER: ts
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      # SECURITY: In production, POSTGRES_PASSWORD should be loaded from a Docker
+      # secret or mounted file rather than an environment variable. See the
+      # POSTGRES_PASSWORD_FILE alternative supported by the official postgres image.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ts"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Security hardening — DB is on internal network only, never exposed
+    # SECURITY: In production, enable disk-level encryption (LUKS/dm-crypt) for
+    # the postgres_data volume, or enable pgcrypto for column-level encryption of
+    # sensitive fields. Chat message ciphertext is E2E-encrypted at the application
+    # layer, but metadata (usernames, timestamps, channel info) is stored in
+    # plaintext and should be protected at rest.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: ts-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - external
+    depends_on:
+      - ts
+    profiles:
+      - production  # Only starts with: docker compose --profile production up
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: ts-turn
+    restart: unless-stopped
+    network_mode: host
+    # TURN_EXTERNAL_IP must be set to the server's public IP for relay to work.
+    # Without it, COTURN advertises Docker bridge IPs that clients can't reach.
+    command: >
+      -n
+      --listening-port=3478
+      --listening-ip=${TURN_EXTERNAL_IP:-0.0.0.0}
+      --external-ip=${TURN_EXTERNAL_IP:-0.0.0.0}
+      --relay-ip=${TURN_EXTERNAL_IP:-0.0.0.0}
+      --fingerprint
+      --lt-cred-mech
+      --user=${TURN_USER:-ts}:${TURN_PASSWORD:-}
+      --realm=ts
+      --no-tls
+      --no-dtls
+      --min-port=49152
+      --max-port=49200
+      --log-file=stdout
+      --no-cli
+      --stale-nonce=600
+      --no-multicast-peers
+      --denied-peer-ip=0.0.0.0-0.255.255.255
+      --denied-peer-ip=10.0.0.0-10.255.255.255
+      --denied-peer-ip=100.64.0.0-100.127.255.255
+      --denied-peer-ip=127.0.0.0-127.255.255.255
+      --denied-peer-ip=169.254.0.0-169.254.255.255
+      --denied-peer-ip=172.16.0.0-172.31.255.255
+      --denied-peer-ip=192.0.0.0-192.0.0.255
+      --denied-peer-ip=192.0.2.0-192.0.2.255
+      --denied-peer-ip=192.88.99.0-192.88.99.255
+      --denied-peer-ip=192.168.0.0-192.168.255.255
+      --denied-peer-ip=198.18.0.0-198.19.255.255
+      --denied-peer-ip=198.51.100.0-198.51.100.255
+      --denied-peer-ip=203.0.113.0-203.0.113.255
+      --denied-peer-ip=240.0.0.0-255.255.255.255
+      --max-bps=1048576
+      --total-quota=300
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    profiles:
+      - turn  # TURN_EXTERNAL_IP=<public-ip> docker compose --profile turn up -d
+
+  cloudflared-quick:
+    image: cloudflare/cloudflared:latest
+    container_name: ts-tunnel-quick
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://ts:8080
+    networks:
+      - external
+    depends_on:
+      - ts
+    profiles:
+      - quick-tunnel  # docker compose --profile quick-tunnel up -d
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+  file_storage:
+
+secrets:
+  jwt_private_key:
+    file: ./secrets/jwt_private.pem
+  jwt_public_key:
+    file: ./secrets/jwt_public.pem
+  totp_encryption_key:
+    file: ./secrets/totp_encryption_key
+  db_password:
+    file: ./secrets/db_password
+
+networks:
+  external:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true  # No internet access — DB isolation

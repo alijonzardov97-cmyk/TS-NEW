@@ -1,0 +1,661 @@
+import { messageStore, type ChatMessage } from '$lib/stores/messages.svelte';
+import { memberStore } from '$lib/stores/members.svelte';
+import { presenceStore } from '$lib/stores/presence.svelte';
+import { channelStore } from '$lib/stores/channels.svelte';
+import { authStore } from '$lib/stores/auth.svelte';
+import { toastStore } from '$lib/stores/toast.svelte';
+import { voiceStore } from '$lib/stores/voice.svelte';
+import { webrtcManager } from '$lib/webrtc/manager';
+import { soundStore } from '$lib/stores/sound.svelte';
+import { notificationStore } from '$lib/stores/notification.svelte';
+import { userStore } from '$lib/stores/users.svelte';
+import { groupStore } from '$lib/stores/groups.svelte';
+import { communityStore } from '$lib/stores/communities.svelte';
+import { readReceiptStore } from '$lib/stores/readReceipts.svelte';
+import { detectMentions } from '$lib/utils/mentions';
+import { getUser } from '$lib/api/users';
+import { wsClient } from './connection';
+import type { ServerMessage } from './types';
+import { initCrypto, getSessionManager, getKeyManager, getCryptoStorage } from '$lib/crypto';
+import { decryptMessage } from '$lib/crypto/decrypt';
+
+// Debounced mark-read for incoming messages while viewing a channel
+let markReadTimer: ReturnType<typeof setTimeout> | null = null;
+function debouncedMarkRead(channelId: string, messageId: string) {
+	if (markReadTimer) clearTimeout(markReadTimer);
+	markReadTimer = setTimeout(() => {
+		wsClient.send({ type: 'mark_read', channel_id: channelId, message_id: messageId });
+	}, 1000);
+}
+
+/** Cancel pending mark-read timer (call on logout). */
+export function clearMarkReadTimer() {
+	if (markReadTimer) {
+		clearTimeout(markReadTimer);
+		markReadTimer = null;
+	}
+}
+
+/** Fetch and cache user info if not already in the store.
+ *  Deduplicates concurrent fetches for the same user ID. */
+const pendingUserFetches = new Map<string, Promise<void>>();
+async function ensureUser(userId: string | null) {
+	if (!userId) return;
+	if (userStore.getUser(userId)) return;
+	const existing = pendingUserFetches.get(userId);
+	if (existing) return existing;
+	const promise = getUser(userId)
+		.then(user => userStore.setUser(user))
+		.catch(() => { /* User lookup failed — display will fall back to truncated ID */ })
+		.finally(() => pendingUserFetches.delete(userId));
+	pendingUserFetches.set(userId, promise);
+	return promise;
+}
+
+/// Handle incoming server WebSocket messages, updating the appropriate stores.
+export async function handleServerMessage(msg: ServerMessage) {
+	switch (msg.type) {
+		case 'new_message': {
+			let content: string;
+			let encryptionStatus: ChatMessage['encryptionStatus'] = 'plaintext';
+			try {
+				const result = await decryptMessage(
+					msg.channel_id,
+					msg.sender_id ?? '',
+					msg.ciphertext,
+					msg.id,
+				);
+				content = result.content;
+				encryptionStatus = result.encrypted ? 'encrypted' : 'plaintext';
+			} catch (err) {
+				console.error('[WS] Failed to decrypt new_message:', err);
+				content = '[Failed to decrypt]';
+				encryptionStatus = 'decryption_failed';
+			}
+			// Fetch user info (don't block message addition)
+			const userReady = ensureUser(msg.sender_id);
+
+			const chatMsg: ChatMessage = {
+				id: msg.id,
+				channelId: msg.channel_id,
+				senderId: msg.sender_id,
+				content,
+				messageType: msg.message_type,
+				replyToId: msg.reply_to,
+				editedAt: null,
+				createdAt: msg.created_at,
+				threadId: msg.thread_id ?? null,
+				encryptionStatus,
+			};
+			messageStore.addMessage(msg.channel_id, chatMsg);
+
+			// Clear typing indicator for this user since they just sent a message
+			if (msg.sender_id) presenceStore.clearTyping(msg.channel_id, msg.sender_id);
+
+			// If this is a thread reply, increment the reply count on the root message
+			if (msg.thread_id) {
+				messageStore.incrementThreadReplyCount(msg.thread_id, msg.created_at);
+				// Notify thread panel if open
+				window.dispatchEvent(
+					new CustomEvent('ts:thread-reply', {
+						detail: { threadId: msg.thread_id, message: chatMsg }
+					})
+				);
+			}
+
+			// Check if user is actively viewing this channel
+			const isViewingChannel = !notificationStore.pageHidden
+				&& channelStore.activeChannelId === msg.channel_id;
+
+			// Only increment unread if not viewing the channel and not own message
+			if (!isViewingChannel && msg.sender_id !== authStore.user?.id) {
+				messageStore.incrementUnread(msg.channel_id);
+			}
+
+			// Auto mark-read when viewing the channel (debounced)
+			if (isViewingChannel && msg.sender_id !== authStore.user?.id) {
+				debouncedMarkRead(msg.channel_id, msg.id);
+			}
+
+			// Notifications (skip own messages) — await user info for proper display name
+			if (msg.sender_id !== authStore.user?.id) {
+				await userReady;
+				const channel = channelStore.channels.find(c => c.id === msg.channel_id);
+				const isDm = channel?.channel_type === 'dm';
+				const senderName = userStore.getDisplayName(msg.sender_id);
+				const channelName = channel?.name ?? 'Direct Message';
+
+				// Detect @mentions
+				const mentions = authStore.user?.username
+					? detectMentions(content, authStore.user.username)
+					: { isMentioned: false };
+
+				// Per-channel notification level (DMs always 'all')
+				const level = isDm ? 'all' : notificationStore.getChannelLevel(msg.channel_id);
+
+				const shouldNotify = level === 'all'
+					|| (level === 'mentions' && mentions.isMentioned);
+
+				if (shouldNotify && !isViewingChannel) {
+					// Play appropriate sound
+					if (isDm) {
+						soundStore.playDmNotification();
+					} else if (mentions.isMentioned) {
+						soundStore.playMentionNotification();
+					} else {
+						soundStore.playChannelNotification();
+					}
+
+					// Desktop notification
+					const preview = content.length > 100 ? content.slice(0, 100) + '...' : content;
+					notificationStore.showDesktopNotification({
+						title: isDm ? senderName : `${senderName} in #${channelName}`,
+						body: preview,
+						channelId: msg.channel_id
+					});
+				}
+			}
+			break;
+		}
+
+		case 'message_sent': {
+			// Confirm optimistic message — find the pending message in this channel
+			const pending = messageStore
+				.getMessages(msg.channel_id)
+				.find((m) => m.pending);
+			if (pending) {
+				messageStore.confirmMessage(msg.channel_id, pending.id, msg.id, msg.created_at);
+				// Cache the sender's plaintext so it survives page reloads.
+				// Double Ratchet is asymmetric — the sender cannot decrypt their
+				// own ciphertext, so we must cache at send time.
+				try {
+					const storage = getCryptoStorage();
+					await storage.setDecryptedMessage(msg.id, pending.content, msg.channel_id);
+				} catch { /* crypto not initialized or IDB error — non-critical */ }
+			}
+			// Notify thread panel of confirmed thread messages
+			if (msg.thread_id) {
+				window.dispatchEvent(
+					new CustomEvent('ts:thread-message-confirmed', {
+						detail: { channelId: msg.channel_id, newId: msg.id, createdAt: msg.created_at, threadId: msg.thread_id }
+					})
+				);
+			}
+			break;
+		}
+
+		case 'message_edited': {
+			let editedContent: string;
+			try {
+				// For own DM edits, the session is keyed by the peer (not self)
+				let peerOverride: string | undefined;
+				if (msg.sender_id === authStore.user?.id) {
+					const ch = channelStore.channels.find(c => c.id === msg.channel_id);
+					if (ch?.channel_type === 'dm') {
+						const members = memberStore.getMembers(msg.channel_id);
+						peerOverride = members.find(m => m.user_id !== authStore.user?.id)?.user_id;
+					}
+				}
+				const editResult = await decryptMessage(
+					msg.channel_id,
+					msg.sender_id ?? '',
+					msg.ciphertext,
+					msg.message_id,
+					peerOverride,
+				);
+				editedContent = editResult.content;
+			} catch (err) {
+				console.error('[WS] Failed to decrypt message_edited:', err);
+				editedContent = '[Failed to decrypt]';
+			}
+			messageStore.editMessage(msg.message_id, editedContent, msg.edited_at);
+			// Notify thread panel
+			window.dispatchEvent(
+				new CustomEvent('ts:thread-message-edited', {
+					detail: { messageId: msg.message_id, content: editedContent, editedAt: msg.edited_at }
+				})
+			);
+			break;
+		}
+
+		case 'message_deleted': {
+			messageStore.deleteMessage(msg.message_id);
+			// Clear editing state if the deleted message was being edited
+			window.dispatchEvent(
+				new CustomEvent('ts:message-edit-cancelled', {
+					detail: { messageId: msg.message_id }
+				})
+			);
+			// Clear reply state if the deleted message was being replied to
+			window.dispatchEvent(
+				new CustomEvent('ts:message-reply-cancelled', {
+					detail: { messageId: msg.message_id }
+				})
+			);
+			// Notify thread panel
+			window.dispatchEvent(
+				new CustomEvent('ts:thread-message-deleted', {
+					detail: { messageId: msg.message_id }
+				})
+			);
+			break;
+		}
+
+		case 'reaction_added': {
+			messageStore.addReaction(msg.message_id, msg.user_id, msg.emoji);
+			// Notify thread panel
+			window.dispatchEvent(
+				new CustomEvent('ts:thread-reaction-updated', {
+					detail: { messageId: msg.message_id, userId: msg.user_id, emoji: msg.emoji, action: 'add' }
+				})
+			);
+			break;
+		}
+
+		case 'reaction_removed': {
+			messageStore.removeReaction(msg.message_id, msg.user_id, msg.emoji);
+			// Notify thread panel
+			window.dispatchEvent(
+				new CustomEvent('ts:thread-reaction-updated', {
+					detail: { messageId: msg.message_id, userId: msg.user_id, emoji: msg.emoji, action: 'remove' }
+				})
+			);
+			break;
+		}
+
+		case 'presence_update': {
+			presenceStore.setStatus(msg.user_id, msg.status);
+			break;
+		}
+
+		case 'presence_bulk': {
+			for (const [userId, status] of msg.statuses) {
+				presenceStore.setStatus(userId, status);
+			}
+			break;
+		}
+
+		case 'user_typing': {
+			presenceStore.setTyping(msg.channel_id, msg.user_id);
+			break;
+		}
+
+		case 'user_stopped_typing': {
+			presenceStore.clearTyping(msg.channel_id, msg.user_id);
+			break;
+		}
+
+		// Voice/Video
+		case 'voice_state_update': {
+			// If the server lists us as a participant but we're not in a call on this
+			// tab, just filter ourselves out of the displayed list. Do NOT auto-leave —
+			// another tab/device may have legitimately joined, and sending leave_voice
+			// here would kill their session. The server's 15-second disconnect grace
+			// period handles real stale sessions (page refresh, crash, etc.).
+			const myId = authStore.user?.id;
+			const inCallOnThisChannel = voiceStore.activeCall?.channelId === msg.channel_id;
+			console.info(`[VOICE-WS] voice_state_update ch=${msg.channel_id.slice(0,8)} participants=[${msg.participants.map((p: string) => p.slice(0,8)).join(',')}] inCallOnThisChannel=${inCallOnThisChannel}`);
+			if (myId && msg.participants.includes(myId) && !inCallOnThisChannel) {
+				// Show other participants in sidebar, but not ourselves (we're not in the call on this tab)
+				const others = msg.participants.filter((p: string) => p !== myId);
+				voiceStore.setChannelParticipants(msg.channel_id, others);
+				for (const uid of others) ensureUser(uid);
+				break;
+			}
+			void webrtcManager.onVoiceStateUpdate(msg.channel_id, msg.participants).catch(err => console.error('[VOICE] voice state update failed:', err));
+			for (const uid of msg.participants) {
+				ensureUser(uid);
+			}
+			break;
+		}
+
+		case 'user_joined_voice': {
+			// Suppress join sound if user was already in the list (reconnect)
+			const alreadyIn = voiceStore.getChannelParticipants(msg.channel_id).includes(msg.user_id);
+			voiceStore.addChannelParticipant(msg.channel_id, msg.user_id);
+			// Peer connections are established solely via voice_state_update
+			// to avoid race conditions with concurrent offer creation.
+			if (msg.user_id !== authStore.user?.id) {
+				if (!alreadyIn && voiceStore.activeCall?.channelId === msg.channel_id) soundStore.playVoiceJoin();
+				ensureUser(msg.user_id);
+			}
+			break;
+		}
+
+		case 'user_left_voice': {
+			voiceStore.removeChannelParticipant(msg.channel_id, msg.user_id);
+			webrtcManager.onUserLeft(msg.user_id);
+			if (msg.user_id !== authStore.user?.id && voiceStore.activeCall?.channelId === msg.channel_id) {
+				soundStore.playVoiceLeave();
+			}
+			break;
+		}
+
+		case 'kicked_from_voice': {
+			voiceStore.removeChannelParticipant(msg.channel_id, msg.user_id);
+			webrtcManager.onUserLeft(msg.user_id);
+			if (msg.user_id === authStore.user?.id) {
+				webrtcManager.leaveCall();
+				toastStore.error('You were kicked from voice');
+			}
+			break;
+		}
+
+		// WebRTC signaling
+		case 'rtc_offer': {
+			void webrtcManager.handleOffer(msg.from_user_id, msg.session_id, msg.sdp).catch(err => console.error('[VOICE] handle offer failed:', err));
+			break;
+		}
+
+		case 'rtc_answer': {
+			void webrtcManager.handleAnswer(msg.from_user_id, msg.sdp).catch(err => console.error('[VOICE] handle answer failed:', err));
+			break;
+		}
+
+		case 'rtc_ice_candidate': {
+			void webrtcManager.handleIceCandidate(msg.from_user_id, msg.session_id, msg.candidate).catch(err => console.error('[VOICE] handle ICE candidate failed:', err));
+			break;
+		}
+
+		case 'member_kicked': {
+			memberStore.removeMember(msg.channel_id, msg.user_id);
+			if (msg.user_id === authStore.user?.id) {
+				// Leave voice if in a call on this channel
+				if (voiceStore.currentChannelId === msg.channel_id && voiceStore.isInCall) {
+					webrtcManager.leaveCall();
+				}
+				channelStore.removeChannel(msg.channel_id);
+				toastStore.error('You were kicked from the channel');
+			}
+			break;
+		}
+
+		case 'member_banned': {
+			memberStore.removeMember(msg.channel_id, msg.user_id);
+			if (msg.user_id === authStore.user?.id) {
+				// Leave voice if in a call on this channel
+				if (voiceStore.currentChannelId === msg.channel_id && voiceStore.isInCall) {
+					webrtcManager.leaveCall();
+				}
+				channelStore.removeChannel(msg.channel_id);
+				toastStore.error('You were banned from this channel');
+			}
+			break;
+		}
+
+		case 'member_role_updated': {
+			memberStore.updateMemberRole(msg.channel_id, msg.user_id, msg.role);
+			break;
+		}
+
+		case 'user_timed_out': {
+			if (msg.user_id === authStore.user?.id) {
+				const until = new Date(msg.expires_at);
+				const reason = msg.reason ? `: ${msg.reason}` : '';
+				toastStore.error(`You have been timed out until ${until.toLocaleTimeString()}${reason}`);
+			}
+			break;
+		}
+
+		case 'new_dm_channel': {
+			// Subscribe to the new DM channel so we receive messages
+			wsClient.send({ type: 'subscribe', channel_ids: [msg.channel_id] });
+
+			// Add the other user to the user cache
+			const existingDmUser = userStore.getUser(msg.other_user_id);
+			userStore.setUser({
+				...existingDmUser,
+				id: msg.other_user_id,
+				username: msg.other_user_username,
+				display_name: msg.other_user_display_name ?? msg.other_user_username,
+				avatar_url: msg.other_user_avatar_url,
+				banner_url: existingDmUser?.banner_url ?? null,
+				status: existingDmUser?.status ?? 'online',
+				custom_status: existingDmUser?.custom_status ?? null
+			});
+
+			// Notify the UI to add this DM to the sidebar
+			window.dispatchEvent(
+				new CustomEvent('ts:new-dm-channel', {
+					detail: {
+						channel: {
+							id: msg.channel_id,
+							name: msg.channel_name,
+							channel_type: 'dm',
+							topic: null,
+							created_by: msg.other_user_id,
+							created_at: msg.created_at,
+							group_id: null
+						},
+						other_user: {
+							id: msg.other_user_id,
+							username: msg.other_user_username,
+							display_name: msg.other_user_display_name,
+							avatar_url: msg.other_user_avatar_url,
+							banner_url: null,
+							status: 'online',
+							custom_status: null
+						}
+					}
+				})
+			);
+			break;
+		}
+
+		case 'read_receipt': {
+			readReceiptStore.setReadPosition(msg.channel_id, msg.user_id, msg.message_id, msg.timestamp);
+			break;
+		}
+
+		case 'message_pinned': {
+			messageStore.addPinned(msg.channel_id, msg.message_id);
+			break;
+		}
+
+		case 'message_unpinned': {
+			messageStore.removePinned(msg.channel_id, msg.message_id);
+			break;
+		}
+
+		// Polls
+		case 'poll_created': {
+			window.dispatchEvent(
+				new CustomEvent('ts:poll-created', {
+					detail: { pollId: msg.poll_id, channelId: msg.channel_id, createdBy: msg.created_by, question: msg.question }
+				})
+			);
+			break;
+		}
+
+		case 'poll_voted': {
+			window.dispatchEvent(
+				new CustomEvent('ts:poll-voted', {
+					detail: { pollId: msg.poll_id, channelId: msg.channel_id, optionIndex: msg.option_index, voterId: msg.voter_id }
+				})
+			);
+			break;
+		}
+
+		case 'poll_vote_removed': {
+			window.dispatchEvent(
+				new CustomEvent('ts:poll-vote-removed', {
+					detail: { pollId: msg.poll_id, channelId: msg.channel_id, optionIndex: msg.option_index, voterId: msg.voter_id }
+				})
+			);
+			break;
+		}
+
+		case 'poll_closed': {
+			window.dispatchEvent(
+				new CustomEvent('ts:poll-closed', {
+					detail: { pollId: msg.poll_id, channelId: msg.channel_id }
+				})
+			);
+			break;
+		}
+
+		// Moderation
+		case 'user_warned': {
+			if (msg.user_id === authStore.user?.id) {
+				toastStore.error(`You received a warning: ${msg.reason} (${msg.warning_count} total)`);
+			}
+			break;
+		}
+
+		// Channel/group settings changes
+		case 'channel_updated': {
+			const ch = channelStore.channels.find(c => c.id === msg.channel_id);
+			if (ch) {
+				channelStore.updateChannel({
+					...ch,
+					name: msg.name,
+					topic: msg.topic,
+					read_only: msg.read_only,
+					slow_mode_seconds: msg.slow_mode_seconds,
+					archived: msg.archived,
+					voice_background: msg.voice_background,
+				});
+			}
+			break;
+		}
+
+		case 'group_updated': {
+			groupStore.updateGroup(msg.group_id, {
+				name: msg.name,
+				description: msg.description,
+				icon_url: msg.icon_url,
+				banner_url: msg.banner_url,
+				accent_color: msg.accent_color,
+				visibility: msg.visibility,
+			});
+			break;
+		}
+
+		case 'community_updated': {
+			communityStore.updateCommunity(msg.community_id, {
+				name: msg.name,
+				description: msg.description,
+				icon_url: msg.icon_url,
+				banner_url: msg.banner_url,
+				community_theme: msg.community_theme,
+				welcome_message: msg.welcome_message,
+			});
+			break;
+		}
+
+		case 'channel_deleted': {
+			channelStore.removeChannel(msg.channel_id);
+			break;
+		}
+
+		case 'group_deleted': {
+			channelStore.removeChannelsForGroup(msg.group_id);
+			groupStore.removeGroup(msg.group_id);
+			break;
+		}
+
+		// User profile changes
+		case 'user_profile_updated': {
+			// Update user cache so display names / avatars refresh everywhere
+			const existing = userStore.getUser(msg.user_id);
+			if (existing) {
+				userStore.setUser({
+					...existing,
+					display_name: msg.display_name,
+					avatar_url: msg.avatar_url,
+					banner_url: msg.banner_url,
+					voice_background_url: msg.voice_background_url,
+					custom_status: msg.custom_status,
+					bio: msg.bio,
+					pronouns: msg.pronouns,
+				});
+			}
+			// If this is the current user (e.g. profile updated from another session),
+			// keep authStore in sync
+			if (msg.user_id === authStore.user?.id) {
+				authStore.updateUser({
+					display_name: msg.display_name,
+					avatar_url: msg.avatar_url,
+					banner_url: msg.banner_url,
+					custom_status: msg.custom_status,
+					bio: msg.bio,
+					pronouns: msg.pronouns,
+				});
+			}
+			break;
+		}
+
+		// Announcements
+		case 'announcement': {
+			toastStore.info(`Announcement: ${msg.title}`);
+			window.dispatchEvent(
+				new CustomEvent('ts:announcement', {
+					detail: { id: msg.id, title: msg.title, body: msg.body, createdBy: msg.created_by, createdAt: msg.created_at }
+				})
+			);
+			break;
+		}
+
+		case 'sender_key_updated': {
+			// Another user uploaded/rotated their sender key
+			if (msg.user_id !== authStore.user?.id) {
+				try {
+					await initCrypto();
+					const sm = getSessionManager();
+					await sm.processSenderKeyDistribution(
+						msg.channel_id,
+						msg.user_id,
+						JSON.stringify(msg.distribution),
+					);
+				} catch (err) {
+					console.error('Failed to process sender key distribution:', err);
+				}
+			}
+			break;
+		}
+
+		case 'sender_key_rotation_required': {
+			// A member was removed — rotate our sender key
+			try {
+				await initCrypto();
+				const sm = getSessionManager();
+				await sm.rotateSenderKeys(msg.channel_id);
+			} catch (err) {
+				console.error('Failed to rotate sender keys:', err);
+			}
+			break;
+		}
+
+		case 'error': {
+			console.error(`Server error: [${msg.code}] ${msg.message}`);
+			if (msg.code === 'slow_mode') {
+				const match = msg.message.match(/wait (\d+)/);
+				const seconds = match ? parseInt(match[1], 10) : 5;
+				window.dispatchEvent(new CustomEvent('ts:slow-mode', { detail: { seconds } }));
+			} else if (msg.code === 'out_of_sync') {
+				// Don't toast — handled by reconnect logic
+			} else if (msg.code === 'rate_limited') {
+				// Silently ignore rate limit errors to avoid toast spam
+			} else {
+				toastStore.error(msg.message);
+			}
+			break;
+		}
+
+		case 'keys_low': {
+			console.warn(`One-time prekeys running low: ${msg.remaining} remaining`);
+			initCrypto()
+				.then(() => getKeyManager().replenishPrekeys())
+				.catch((err) => console.error('Failed to replenish prekeys:', err));
+			break;
+		}
+
+		case 'pong':
+		case 'authenticated':
+			break;
+
+		default:
+			console.warn('[WS] Unknown message type:', (msg as { type: string }).type);
+			break;
+	}
+}

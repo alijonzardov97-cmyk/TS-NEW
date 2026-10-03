@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TS</string>
+
+    <string name="unlock_title">TS заблокирован</string>
+    <string name="unlock_subtitle">Подтвердите, что это вы, чтобы открыть чаты</string>
+    <string name="unlock_button">Разблокировать</string>
+    <string name="unlock_failed">Не удалось разблокировать. Попробуйте ещё раз.</string>
+    <string name="unlock_no_lock">Установите на устройстве блокировку экрана (PIN, графический ключ или биометрию), чтобы пользоваться TS.</string>
+
+    <string name="connect_title">Подключение к серверу</string>
+    <string name="connect_hint">Введите адрес вашего сервера TS. Разрешены только защищённые соединения https://.</string>
+    <string name="server_address">Адрес сервера</string>
+    <string name="connect_button">Подключиться</string>
+    <string name="connecting">Подключаемся…</string>
+    <string name="pin_title">Проверьте отпечаток сервера</string>
+    <string name="pin_hint">Сравните этот отпечаток с тем, что дал вам администратор сервера. TS запомнит его и откажется работать с сервером с другим сертификатом.</string>
+    <string name="pin_confirm">Совпадает — доверять серверу</string>
+    <string name="pin_cancel">Отмена</string>
+    <string name="change_server">Сменить сервер</string>
+
+    <string name="login_title">С возвращением!</string>
+    <string name="username">Имя пользователя</string>
+    <string name="password">Пароль</string>
+    <string name="totp_code">Код 2FA или резервный код</string>
+    <string name="sign_in">Войти</string>
+    <string name="signing_in">Входим…</string>
+    <string name="create_account">Создать аккаунт</string>
+    <string name="have_account">У меня уже есть аккаунт</string>
+    <string name="show_password">Показать пароль</string>
+    <string name="hide_password">Скрыть пароль</string>
+
+    <string name="register_title">Создайте аккаунт</string>
+    <string name="email">Электронная почта</string>
+    <string name="display_name">Отображаемое имя (необязательно)</string>
+    <string name="invite_code">Код приглашения</string>
+    <string name="confirm_password">Повторите пароль</string>
+    <string name="registering">Создаём аккаунт…</string>
+    <string name="password_rules">Не меньше 8 символов: заглавная и строчная буквы, цифра и специальный символ.</string>
+
+    <string name="recovery_title">Сохраните код восстановления</string>
+    <string name="recovery_body">Это единственный способ вернуть доступ к аккаунту, если вы забудете пароль. Запишите код и храните в надёжном месте. Повторно он показан не будет.</string>
+    <string name="recovery_saved">Я сохранил(а) код</string>
+
+    <string name="home_title">Чаты</string>
+    <string name="home_placeholder">Вы вошли в аккаунт. Чаты появятся в следующей версии.</string>
+    <string name="sign_out">Выйти</string>
+
+    <string name="error_generic">Что-то пошло не так. Попробуйте ещё раз.</string>
+    <string name="error_network">Нет связи с сервером. Проверьте интернет и попробуйте снова.</string>
+    <string name="error_https_only">Разрешены только защищённые адреса https://.</string>
+    <string name="error_bad_credentials">Неверное имя пользователя или пароль.</string>
+    <string name="error_too_many">Слишком много попыток. Подождите несколько минут и попробуйте снова.</string>
+    <string name="error_cert_changed">Сертификат сервера больше не совпадает с сохранённым отпечатком. Возможна атака. Не продолжайте, пока администратор не подтвердит замену.</string>
+    <string name="error_pw_mismatch">Пароли не совпадают.</string>
+    <string name="error_pw_rules">Пароль пока не соответствует всем требованиям.</string>
+    <string name="error_username_taken">Это имя уже занято.</string>
+    <string name="error_invite">Код приглашения недействителен или срок его действия истёк.</string>
+    <string name="error_not_ts_server">Этот адрес не похож на сервер TS.</string>
+</resources>

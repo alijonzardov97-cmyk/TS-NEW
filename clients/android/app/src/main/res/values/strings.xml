@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TS</string>
+
+    <string name="unlock_title">TS is locked</string>
+    <string name="unlock_subtitle">Confirm it\'s you to open your chats</string>
+    <string name="unlock_button">Unlock</string>
+    <string name="unlock_failed">Could not unlock. Try again.</string>
+    <string name="unlock_no_lock">Set a screen lock (PIN, pattern or biometrics) on this device to use TS.</string>
+
+    <string name="connect_title">Connect to a server</string>
+    <string name="connect_hint">Enter the address of your TS server. Only secure https:// connections are allowed.</string>
+    <string name="server_address">Server address</string>
+    <string name="connect_button">Connect</string>
+    <string name="connecting">Connecting…</string>
+    <string name="pin_title">Check the server fingerprint</string>
+    <string name="pin_hint">Compare this fingerprint with the one your server administrator gave you. TS will remember it and refuse to talk to a server with a different certificate.</string>
+    <string name="pin_confirm">It matches — trust this server</string>
+    <string name="pin_cancel">Cancel</string>
+    <string name="change_server">Change server</string>
+
+    <string name="login_title">Welcome back</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="totp_code">2FA code or backup code</string>
+    <string name="sign_in">Sign in</string>
+    <string name="signing_in">Signing in…</string>
+    <string name="create_account">Create account</string>
+    <string name="have_account">I already have an account</string>
+    <string name="show_password">Show password</string>
+    <string name="hide_password">Hide password</string>
+
+    <string name="register_title">Create your account</string>
+    <string name="email">Email</string>
+    <string name="display_name">Display name (optional)</string>
+    <string name="invite_code">Invite code</string>
+    <string name="confirm_password">Confirm password</string>
+    <string name="registering">Creating account…</string>
+    <string name="password_rules">At least 8 characters with an uppercase letter, a lowercase letter, a digit and a special character.</string>
+
+    <string name="recovery_title">Save your recovery code</string>
+    <string name="recovery_body">This is the only way to get back into your account if you forget your password. Write it down and keep it somewhere safe. It will not be shown again.</string>
+    <string name="recovery_saved">I\'ve saved my code</string>
+
+    <string name="home_title">Chats</string>
+    <string name="home_placeholder">You are signed in. Chats are coming in the next version.</string>
+    <string name="sign_out">Sign out</string>
+
+    <string name="error_generic">Something went wrong. Please try again.</string>
+    <string name="error_network">No connection to the server. Check your internet and try again.</string>
+    <string name="error_https_only">Only secure https:// addresses are allowed.</string>
+    <string name="error_bad_credentials">Incorrect username or password.</string>
+    <string name="error_too_many">Too many attempts. Please wait a few minutes and try again.</string>
+    <string name="error_cert_changed">The server\'s certificate no longer matches the saved fingerprint. This may be an attack. Do not continue unless your administrator confirms the change.</string>
+    <string name="error_pw_mismatch">The passwords do not match.</string>
+    <string name="error_pw_rules">Your password does not meet all requirements yet.</string>
+    <string name="error_username_taken">This username is already taken.</string>
+    <string name="error_invite">This invite code is not valid or has expired.</string>
+    <string name="error_not_ts_server">This address does not look like a TS server.</string>
+</resources>

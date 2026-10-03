@@ -1,0 +1,801 @@
+use std::sync::LazyLock;
+
+use argon2::{
+    Algorithm, Argon2, Params, Version,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+};
+use chrono::Utc;
+use dashmap::DashMap;
+use jsonwebtoken::{Algorithm as JwtAlg, Header};
+use rand::RngCore;
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
+use zeroize::Zeroize;
+
+use ts_common::api_types::{
+    AuthResponse, LoginRequest, RefreshRequest, RegisterRequest, TokenResponse, UserPublic,
+};
+use ts_common::constants::{ACCESS_TOKEN_LIFETIME_SECS, REFRESH_TOKEN_LIFETIME_SECS};
+use ts_db::repos::{key_repo, registration_invite_repo, user_repo};
+
+use crate::app_state::AppState;
+use crate::error::AppError;
+use crate::middleware::auth::AccessClaims;
+
+// ── Account Lockout ──
+
+/// Max failed login attempts before lockout.
+const MAX_LOGIN_ATTEMPTS: u32 = 10;
+/// Lockout duration: 15 minutes.
+const LOCKOUT_DURATION_SECS: i64 = 900;
+
+struct LockoutEntry {
+    attempts: u32,
+    last_attempt: chrono::DateTime<Utc>,
+    locked_until: Option<chrono::DateTime<Utc>>,
+}
+
+/// In-memory tracking of failed login attempts per username.
+/// Resets on server restart (acceptable tradeoff vs DB round-trip on every login).
+static LOGIN_ATTEMPTS: LazyLock<DashMap<String, LockoutEntry>> = LazyLock::new(DashMap::new);
+
+/// Check if an account is currently locked out. Returns remaining seconds if locked.
+fn check_lockout(username: &str) -> Option<i64> {
+    if let Some(entry) = LOGIN_ATTEMPTS.get(username)
+        && let Some(locked_until) = entry.locked_until
+    {
+        let remaining = (locked_until - Utc::now()).num_seconds();
+        if remaining > 0 {
+            return Some(remaining);
+        }
+    }
+    None
+}
+
+/// Max failed attempts from a single IP (across all usernames) before that IP is locked out.
+const MAX_IP_FAILED_ATTEMPTS: u32 = 30;
+/// Soft cap on tracked keys; stale entries are evicted when exceeded.
+const MAX_TRACKED_KEYS: usize = 50_000;
+
+/// Record a failed login attempt. Locks the key after `max` attempts.
+fn record_failed_login_max(key: &str, max: u32) {
+    let now = Utc::now();
+
+    // Bound memory: drop stale entries when the table grows too large.
+    if LOGIN_ATTEMPTS.len() > MAX_TRACKED_KEYS {
+        LOGIN_ATTEMPTS.retain(|_, e| {
+            (now - e.last_attempt).num_seconds() < LOCKOUT_DURATION_SECS
+                || e.locked_until.is_some_and(|t| t > now)
+        });
+    }
+
+    let mut entry = LOGIN_ATTEMPTS
+        .entry(key.to_string())
+        .or_insert_with(|| LockoutEntry {
+            attempts: 0,
+            last_attempt: now,
+            locked_until: None,
+        });
+
+    // Old failures age out so a long-past typo never counts toward a lockout.
+    if (now - entry.last_attempt).num_seconds() >= LOCKOUT_DURATION_SECS
+        && entry.locked_until.is_none_or(|t| t <= now)
+    {
+        entry.attempts = 0;
+        entry.locked_until = None;
+    }
+
+    entry.attempts += 1;
+    entry.last_attempt = now;
+
+    if entry.attempts >= max {
+        entry.locked_until = Some(now + chrono::TimeDelta::seconds(LOCKOUT_DURATION_SECS));
+        tracing::warn!("Lockout triggered after {} failed attempts", entry.attempts);
+    }
+}
+
+fn record_failed_login(username: &str) {
+    record_failed_login_max(username, MAX_LOGIN_ATTEMPTS);
+}
+
+/// Lockout key bound to both the account and the client IP, so a remote attacker
+/// cannot lock a legitimate user out of their own account from a different address.
+fn login_lockout_key(username: &str, ip: Option<&str>) -> String {
+    format!("u|{}|{}", username.to_lowercase(), ip.unwrap_or("unknown"))
+}
+
+fn ip_lockout_key(ip: Option<&str>) -> String {
+    format!("ip|{}", ip.unwrap_or("unknown"))
+}
+
+/// Precomputed Argon2 hash verified for unknown users so response time does not
+/// reveal whether a username exists.
+static DUMMY_PASSWORD_HASH: LazyLock<String> = LazyLock::new(|| {
+    hash_password("dummy-password-for-timing-equalization")
+        .unwrap_or_else(|_| String::from("$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHRzb21l$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))
+});
+
+/// Clear lockout tracking on successful login.
+fn clear_lockout(username: &str) {
+    LOGIN_ATTEMPTS.remove(username);
+}
+
+/// Check lockout by arbitrary key (for account recovery rate limiting).
+pub fn check_lockout_by_key(key: &str) -> Option<i64> {
+    check_lockout(key)
+}
+
+/// Record a failed attempt by arbitrary key.
+pub fn record_failed_attempt(key: &str) {
+    record_failed_login(key);
+}
+
+/// Clear lockout by arbitrary key.
+pub fn clear_lockout_by_key(key: &str) {
+    clear_lockout(key);
+}
+
+/// Validate password complexity (public wrapper).
+pub fn validate_password_public(password: &str) -> Result<(), AppError> {
+    validate_password(password)
+}
+
+/// Hash a password with Argon2id (public wrapper).
+pub fn hash_password_public(password: &str) -> Result<String, AppError> {
+    hash_password(password)
+}
+
+/// Hash a password with Argon2id.
+pub(crate) fn hash_password(password: &str) -> Result<String, AppError> {
+    let salt = SaltString::generate(&mut OsRng);
+    let params = Params::new(65536, 3, 4, Some(32))
+        .map_err(|e| AppError::Internal(format!("argon2 params: {e}")))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+
+    argon2
+        .hash_password(password.as_bytes(), &salt)
+        .map(|h| h.to_string())
+        .map_err(|e| AppError::Internal(format!("password hash failed: {e}")))
+}
+
+/// Verify a password against an Argon2id hash.
+pub(crate) fn verify_password(password: &str, hash: &str) -> Result<bool, AppError> {
+    let parsed = PasswordHash::new(hash)
+        .map_err(|e| AppError::Internal(format!("invalid password hash: {e}")))?;
+    Ok(Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
+        .is_ok())
+}
+
+/// Generate a cryptographically random refresh token (32 bytes) and return (raw, sha256_hash).
+pub(crate) fn generate_refresh_token() -> (Vec<u8>, Vec<u8>) {
+    let mut token = vec![0u8; 32];
+    OsRng.fill_bytes(&mut token);
+
+    let mut hasher = Sha256::new();
+    hasher.update(&token);
+    let hash = hasher.finalize().to_vec();
+
+    (token, hash)
+}
+
+/// Generate a recovery code in XXXX-XXXX-XXXX-XXXX format and its SHA-256 hash.
+pub fn generate_recovery_code() -> (String, String) {
+    const CHARSET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/O/0/1 for readability
+    let mut rng = OsRng;
+    let mut code_chars = Vec::with_capacity(19); // 16 chars + 3 dashes
+    for i in 0..16 {
+        if i > 0 && i % 4 == 0 {
+            code_chars.push(b'-');
+        }
+        let mut byte = [0u8; 1];
+        rng.fill_bytes(&mut byte);
+        code_chars.push(CHARSET[(byte[0] as usize) % CHARSET.len()]);
+    }
+    let code = String::from_utf8(code_chars).expect("valid ascii");
+    let hash = hex::encode(Sha256::digest(code.as_bytes()));
+    (code, hash)
+}
+
+/// Generate a batch of TOTP backup codes (XXXX-XXXX format) and their hashes.
+pub fn generate_backup_codes(count: usize) -> (Vec<String>, Vec<String>) {
+    const CHARSET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let mut rng = OsRng;
+    let mut codes = Vec::with_capacity(count);
+    let mut hashes = Vec::with_capacity(count);
+    for _ in 0..count {
+        let mut code_chars = Vec::with_capacity(9); // 8 chars + 1 dash
+        for i in 0..8 {
+            if i == 4 {
+                code_chars.push(b'-');
+            }
+            let mut byte = [0u8; 1];
+            rng.fill_bytes(&mut byte);
+            code_chars.push(CHARSET[(byte[0] as usize) % CHARSET.len()]);
+        }
+        let code = String::from_utf8(code_chars).expect("valid ascii");
+        let hash = hex::encode(Sha256::digest(code.as_bytes()));
+        codes.push(code);
+        hashes.push(hash);
+    }
+    (codes, hashes)
+}
+
+/// Issue a JWT access token.
+pub(crate) fn issue_access_token(
+    state: &AppState,
+    user_id: Uuid,
+    username: &str,
+    is_admin: bool,
+    is_owner: bool,
+) -> Result<String, AppError> {
+    use crate::middleware::auth::JWT_AUDIENCE;
+    let now = Utc::now().timestamp();
+    let claims = AccessClaims {
+        sub: user_id,
+        username: username.to_string(),
+        is_admin,
+        is_owner,
+        iat: now,
+        exp: now + ACCESS_TOKEN_LIFETIME_SECS,
+        jti: Uuid::new_v4(),
+        aud: JWT_AUDIENCE.to_string(),
+    };
+
+    let header = Header::new(JwtAlg::EdDSA);
+    jsonwebtoken::encode(&header, &claims, &state.jwt_encoding_key)
+        .map_err(|e| AppError::Internal(format!("jwt encode failed: {e}")))
+}
+
+pub(crate) fn user_to_public(
+    user: &ts_db::models::user::User,
+    is_admin: bool,
+    is_owner: bool,
+) -> UserPublic {
+    UserPublic {
+        id: user.id,
+        username: user.username.clone(),
+        display_name: user.display_name.clone(),
+        avatar_url: user.avatar_url.clone(),
+        banner_url: user.banner_url.clone(),
+        voice_background_url: user.voice_background_url.clone(),
+        status: user.status.clone(),
+        custom_status: user.custom_status.clone(),
+        bio: user.bio.clone(),
+        pronouns: user.pronouns.clone(),
+        is_admin,
+        is_owner,
+        created_at: Some(user.created_at.to_rfc3339()),
+    }
+}
+
+/// Validate username format: alphanumeric, underscores, hyphens, dots, 3-32 chars.
+fn validate_username(username: &str) -> Result<(), AppError> {
+    if username.len() < 3 || username.len() > 32 {
+        return Err(AppError::Validation(
+            "username must be between 3 and 32 characters".to_string(),
+        ));
+    }
+    if !username
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
+        return Err(AppError::Validation(
+            "username may only contain letters, numbers, underscores, hyphens, and dots"
+                .to_string(),
+        ));
+    }
+    if !username.starts_with(|c: char| c.is_ascii_alphanumeric()) {
+        return Err(AppError::Validation(
+            "username must start with a letter or number".to_string(),
+        ));
+    }
+    if username.ends_with('.') {
+        return Err(AppError::Validation(
+            "username must not end with a dot".to_string(),
+        ));
+    }
+    if username.contains("..") {
+        return Err(AppError::Validation(
+            "username must not contain consecutive dots".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Validate password complexity: 8-128 chars, at least 1 uppercase, 1 lowercase, 1 digit, 1 special char.
+pub(crate) fn validate_password(password: &str) -> Result<(), AppError> {
+    if password.len() < 8 {
+        return Err(AppError::Validation(
+            "password must be at least 8 characters".to_string(),
+        ));
+    }
+    if password.len() > 128 {
+        return Err(AppError::Validation(
+            "password must be at most 128 characters".to_string(),
+        ));
+    }
+    if !password.chars().any(|c| c.is_ascii_uppercase()) {
+        return Err(AppError::Validation(
+            "password must contain at least one uppercase letter".to_string(),
+        ));
+    }
+    if !password.chars().any(|c| c.is_ascii_lowercase()) {
+        return Err(AppError::Validation(
+            "password must contain at least one lowercase letter".to_string(),
+        ));
+    }
+    if !password.chars().any(|c| c.is_ascii_digit()) {
+        return Err(AppError::Validation(
+            "password must contain at least one digit".to_string(),
+        ));
+    }
+    if !password.chars().any(|c| !c.is_ascii_alphanumeric()) {
+        return Err(AppError::Validation(
+            "password must contain at least one special character".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Basic email format validation.
+fn validate_email(email: &str) -> Result<(), AppError> {
+    if email.len() > 254 {
+        return Err(AppError::Validation("email too long".to_string()));
+    }
+    let parts: Vec<&str> = email.splitn(2, '@').collect();
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() || !parts[1].contains('.') {
+        return Err(AppError::Validation("invalid email format".to_string()));
+    }
+    Ok(())
+}
+
+/// Register a new user.
+pub async fn register(
+    state: &AppState,
+    req: RegisterRequest,
+    device_name: Option<&str>,
+    ip_address: Option<&str>,
+) -> Result<AuthResponse, AppError> {
+    // Check registration mode (but don't consume invite yet)
+    let invite_code = match state.config.registration_mode.as_str() {
+        "closed" => {
+            return Err(AppError::Validation(
+                "registration is currently disabled".to_string(),
+            ));
+        }
+        "invite_only" => {
+            // Allow first user to register without invite (bootstrap)
+            let user_count = user_repo::count_users(&state.db).await.unwrap_or(1);
+            if user_count == 0 {
+                tracing::info!("First-user bootstrap: skipping invite requirement");
+                None
+            } else {
+                let code = req.invite_code.as_deref().ok_or_else(|| {
+                    AppError::Validation("an invite code is required to register".to_string())
+                })?;
+                if code.is_empty() {
+                    return Err(AppError::Validation(
+                        "an invite code is required to register".to_string(),
+                    ));
+                }
+                Some(code.to_string())
+            }
+        }
+        _ => None, // "open" or anything else — allow registration
+    };
+
+    // Validate input BEFORE consuming the invite code
+    validate_username(&req.username)?;
+    validate_email(&req.email)?;
+
+    validate_password(&req.password)?;
+    if req.identity_key.len() != 32 {
+        return Err(AppError::Validation(
+            "identity key must be 32 bytes".to_string(),
+        ));
+    }
+    if req.signed_prekey.public_key.len() != 32 {
+        return Err(AppError::Validation(
+            "signed prekey must be 32 bytes".to_string(),
+        ));
+    }
+    if req.signed_prekey.signature.len() != 64 {
+        return Err(AppError::Validation(
+            "signed prekey signature must be 64 bytes".to_string(),
+        ));
+    }
+
+    // Verify the signed prekey signature against the identity key
+    verify_signed_prekey_signature(
+        &req.identity_key,
+        &req.signed_prekey.public_key,
+        &req.signed_prekey.signature,
+    )?;
+
+    // Check uniqueness BEFORE consuming the invite code
+    if user_repo::username_exists(&state.db, &req.username).await? {
+        return Err(AppError::Conflict("username already taken".to_string()));
+    }
+    if user_repo::email_exists(&state.db, &req.email).await? {
+        return Err(AppError::Conflict("email already registered".to_string()));
+    }
+
+    // Now consume the invite code (all validation passed)
+    if let Some(code) = &invite_code {
+        let consumed = registration_invite_repo::validate_and_consume(&state.db, code).await?;
+        if consumed.is_none() {
+            return Err(AppError::Validation(
+                "invalid, expired, or fully used invite code".to_string(),
+            ));
+        }
+    }
+
+    // Hash password
+    let password_hash = hash_password(&req.password)?;
+
+    // Compute identity key fingerprint
+    let fingerprint = hex::encode(Sha256::digest(&req.identity_key));
+
+    // Create user
+    let user_id = Uuid::now_v7();
+    let user = user_repo::create_user(
+        &state.db,
+        user_id,
+        &req.username,
+        &req.display_name,
+        &req.email,
+        &password_hash,
+        &req.identity_key,
+        &fingerprint,
+    )
+    .await?;
+
+    // Store signed prekey
+    key_repo::upsert_signed_prekey(
+        &state.db,
+        Uuid::now_v7(),
+        user_id,
+        req.signed_prekey.key_id,
+        &req.signed_prekey.public_key,
+        &req.signed_prekey.signature,
+    )
+    .await?;
+
+    // Store one-time prekeys
+    if !req.one_time_prekeys.is_empty() {
+        let pairs: Vec<(i32, Vec<u8>)> = req
+            .one_time_prekeys
+            .into_iter()
+            .map(|p| (p.key_id, p.public_key))
+            .collect();
+        key_repo::upload_one_time_prekeys(&state.db, user_id, &pairs).await?;
+    }
+
+    // First registered user becomes admin + owner automatically
+    let (is_admin, is_owner) = if user_repo::count_users(&state.db).await.unwrap_or(1) == 1 {
+        user_repo::set_admin(&state.db, user.id, true).await.ok();
+        user_repo::set_owner(&state.db, user.id, true).await.ok();
+        (true, true)
+    } else {
+        (user.is_admin, user.is_owner)
+    };
+
+    // Issue tokens
+    let access_token = issue_access_token(state, user.id, &user.username, is_admin, is_owner)?;
+    let (mut refresh_raw, refresh_hash) = generate_refresh_token();
+
+    let refresh_id = Uuid::new_v4();
+    let expires_at =
+        Utc::now() + chrono::TimeDelta::seconds(REFRESH_TOKEN_LIFETIME_SECS);
+
+    user_repo::create_refresh_token(
+        &state.db,
+        refresh_id,
+        user.id,
+        &refresh_hash,
+        device_name,
+        ip_address,
+        expires_at,
+    )
+    .await?;
+
+    // Generate and store recovery code
+    let (recovery_code, recovery_hash) = generate_recovery_code();
+    user_repo::set_recovery_code_hash(&state.db, user.id, &recovery_hash).await?;
+
+    // Audit log
+    user_repo::insert_audit_log(
+        &state.db,
+        Uuid::now_v7(),
+        Some(user.id),
+        "register",
+        ip_address,
+        device_name,
+        None,
+    )
+    .await?;
+
+    let refresh_token_hex = hex::encode(&refresh_raw);
+    refresh_raw.zeroize();
+
+    Ok(AuthResponse {
+        access_token,
+        refresh_token: refresh_token_hex,
+        user: user_to_public(&user, is_admin, is_owner),
+        recovery_code: Some(recovery_code),
+    })
+}
+
+/// Log in an existing user.
+pub async fn login(
+    state: &AppState,
+    req: LoginRequest,
+    device_name: Option<&str>,
+    ip_address: Option<&str>,
+) -> Result<AuthResponse, AppError> {
+    // Check if password login is disabled (OIDC-only mode)
+    if state.config.oidc_disable_password_login {
+        return Err(AppError::Validation(
+            "password login is disabled, use SSO".to_string(),
+        ));
+    }
+
+    // Check lockout (per account+IP and per IP) before doing any DB work
+    let user_key = login_lockout_key(&req.username, ip_address);
+    let ip_key = ip_lockout_key(ip_address);
+    if let Some(remaining) = check_lockout(&user_key).or_else(|| check_lockout(&ip_key)) {
+        return Err(AppError::Validation(format!(
+            "too many failed attempts, try again in {remaining} seconds"
+        )));
+    }
+
+    let user = match user_repo::find_by_username(&state.db, &req.username).await? {
+        Some(u) => u,
+        None => {
+            // Burn the same Argon2 time as a real verification and track the failure
+            // identically, so unknown and known usernames are indistinguishable.
+            let _ = verify_password(&req.password, &DUMMY_PASSWORD_HASH);
+            record_failed_login_max(&user_key, MAX_LOGIN_ATTEMPTS);
+            record_failed_login_max(&ip_key, MAX_IP_FAILED_ATTEMPTS);
+            tracing::warn!("Failed login attempt for unknown user");
+            return Err(AppError::Unauthorized);
+        }
+    };
+
+    // OIDC-only users have no password — reject password login
+    let password_hash = match &user.password_hash {
+        Some(h) => h,
+        None => {
+            let _ = verify_password(&req.password, &DUMMY_PASSWORD_HASH);
+            record_failed_login_max(&user_key, MAX_LOGIN_ATTEMPTS);
+            record_failed_login_max(&ip_key, MAX_IP_FAILED_ATTEMPTS);
+            tracing::warn!("Password login attempted for OIDC-only user: {}", req.username);
+            return Err(AppError::Unauthorized);
+        }
+    };
+
+    // Verify password (constant-time via Argon2)
+    if !verify_password(&req.password, password_hash)? {
+        tracing::warn!("Failed login attempt for user: {}", req.username);
+        record_failed_login_max(&user_key, MAX_LOGIN_ATTEMPTS);
+        record_failed_login_max(&ip_key, MAX_IP_FAILED_ATTEMPTS);
+        // Audit failed login
+        user_repo::insert_audit_log(
+            &state.db,
+            Uuid::now_v7(),
+            Some(user.id),
+            "login_failed",
+            ip_address,
+            device_name,
+            None,
+        )
+        .await?;
+        return Err(AppError::Unauthorized);
+    }
+
+    // TOTP verification (with backup code fallback)
+    if user.totp_enabled {
+        let code = req
+            .totp_code
+            .as_deref()
+            .ok_or_else(|| AppError::Validation("2FA code required".to_string()))?;
+        let totp_secret = user
+            .totp_secret
+            .as_ref()
+            .ok_or_else(|| AppError::Internal("totp_enabled but no secret".to_string()))?;
+        let totp_ok = crate::routes::totp::verify_totp_code(
+            totp_secret,
+            code,
+            &state.config.totp_encryption_key,
+        )?;
+
+        if !totp_ok {
+            // Try backup code fallback
+            let code_hash = hex::encode(Sha256::digest(code.as_bytes()));
+            let backup_ok =
+                user_repo::consume_totp_backup_code(&state.db, user.id, &code_hash).await?;
+
+            if !backup_ok {
+                tracing::warn!("Failed login attempt (invalid 2FA code) for user: {}", req.username);
+                record_failed_login_max(&user_key, MAX_LOGIN_ATTEMPTS);
+                record_failed_login_max(&ip_key, MAX_IP_FAILED_ATTEMPTS);
+                user_repo::insert_audit_log(
+                    &state.db,
+                    Uuid::now_v7(),
+                    Some(user.id),
+                    "login_failed_2fa",
+                    ip_address,
+                    device_name,
+                    None,
+                )
+                .await?;
+                return Err(AppError::Unauthorized);
+            }
+            // Backup code consumed successfully — log it
+            user_repo::insert_audit_log(
+                &state.db,
+                Uuid::now_v7(),
+                Some(user.id),
+                "login_backup_code_used",
+                ip_address,
+                device_name,
+                None,
+            )
+            .await?;
+        }
+    }
+
+    // Check suspension
+    if user.suspended_at.is_some() {
+        return Err(AppError::Validation("account is suspended".to_string()));
+    }
+
+    // Successful login — clear any lockout tracking
+    clear_lockout(&user_key);
+
+    // Revoke all existing refresh tokens for this user (token rotation on login)
+    if let Err(e) = user_repo::revoke_all_refresh_tokens(&state.db, user.id).await {
+        tracing::warn!("Failed to revoke old refresh tokens for {}: {e}", user.id);
+    }
+
+    // Issue tokens
+    let access_token =
+        issue_access_token(state, user.id, &user.username, user.is_admin, user.is_owner)?;
+    let (mut refresh_raw, refresh_hash) = generate_refresh_token();
+
+    let refresh_id = Uuid::new_v4();
+    let expires_at =
+        Utc::now() + chrono::TimeDelta::seconds(REFRESH_TOKEN_LIFETIME_SECS);
+
+    user_repo::create_refresh_token(
+        &state.db,
+        refresh_id,
+        user.id,
+        &refresh_hash,
+        device_name,
+        ip_address,
+        expires_at,
+    )
+    .await?;
+
+    // Audit successful login
+    user_repo::insert_audit_log(
+        &state.db,
+        Uuid::now_v7(),
+        Some(user.id),
+        "login",
+        ip_address,
+        device_name,
+        None,
+    )
+    .await?;
+
+    let refresh_token_hex = hex::encode(&refresh_raw);
+    refresh_raw.zeroize();
+
+    Ok(AuthResponse {
+        access_token,
+        refresh_token: refresh_token_hex,
+        user: user_to_public(&user, user.is_admin, user.is_owner),
+        recovery_code: None,
+    })
+}
+
+/// Refresh an access token using a valid refresh token.
+pub async fn refresh_token(
+    state: &AppState,
+    req: RefreshRequest,
+    device_name: Option<&str>,
+    ip_address: Option<&str>,
+) -> Result<TokenResponse, AppError> {
+    // Decode the hex refresh token and hash it
+    let raw_token = hex::decode(&req.refresh_token).map_err(|_| AppError::Unauthorized)?;
+    let token_hash = Sha256::digest(&raw_token).to_vec();
+
+    // Use a transaction to atomically revoke old token + create new one
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| AppError::Internal(format!("transaction begin: {e}")))?;
+
+    // Look up the refresh token
+    let stored = user_repo::find_refresh_token_by_hash_tx(&mut tx, &token_hash)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    // Revoke the old refresh token (rotation)
+    user_repo::revoke_refresh_token_tx(&mut tx, stored.id).await?;
+
+    // Look up the user
+    let user = user_repo::find_by_id(&state.db, stored.user_id)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    // Check suspension
+    if user.suspended_at.is_some() {
+        return Err(AppError::Unauthorized);
+    }
+
+    // Issue new tokens
+    let access_token =
+        issue_access_token(state, user.id, &user.username, user.is_admin, user.is_owner)?;
+    let (mut refresh_raw, refresh_hash) = generate_refresh_token();
+
+    let refresh_id = Uuid::new_v4();
+    let expires_at =
+        Utc::now() + chrono::TimeDelta::seconds(REFRESH_TOKEN_LIFETIME_SECS);
+
+    user_repo::create_refresh_token_tx(
+        &mut tx,
+        refresh_id,
+        user.id,
+        &refresh_hash,
+        device_name,
+        ip_address,
+        expires_at,
+    )
+    .await?;
+
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Internal(format!("transaction commit: {e}")))?;
+
+    let refresh_token_hex = hex::encode(&refresh_raw);
+    refresh_raw.zeroize();
+
+    Ok(TokenResponse {
+        access_token,
+        refresh_token: refresh_token_hex,
+    })
+}
+
+/// Verify that a signed prekey's signature is valid against the identity key.
+///
+/// In X3DH, the signed prekey (X25519 public key) is signed by the Ed25519 identity key.
+/// The server must verify this to prevent clients from registering forged key material.
+pub fn verify_signed_prekey_signature(
+    identity_key: &[u8],
+    signed_prekey_public: &[u8],
+    signature: &[u8],
+) -> Result<(), AppError> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    let ik_bytes: [u8; 32] = identity_key
+        .try_into()
+        .map_err(|_| AppError::Validation("identity key must be 32 bytes".to_string()))?;
+    let verifying_key = VerifyingKey::from_bytes(&ik_bytes)
+        .map_err(|_| AppError::Validation("invalid identity key".to_string()))?;
+
+    let sig_bytes: [u8; 64] = signature
+        .try_into()
+        .map_err(|_| AppError::Validation("signature must be 64 bytes".to_string()))?;
+    let sig = Signature::from_bytes(&sig_bytes);
+
+    verifying_key
+        .verify(signed_prekey_public, &sig)
+        .map_err(|_| {
+            AppError::Validation("signed prekey signature verification failed".to_string())
+        })
+}

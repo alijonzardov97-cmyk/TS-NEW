@@ -1,0 +1,27 @@
+[package]
+name = "ts-crypto-ffi"
+version = "0.1.0"
+edition = "2024"
+description = "UniFFI bindings exposing ts-crypto to the Android (Kotlin) client"
+license = "GPL-3.0-only"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+ts-crypto = { path = "../ts-crypto" }
+uniffi = { version = "0.28", features = ["cli"] }
+thiserror = "2"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+rand = "0.8"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

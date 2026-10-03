@@ -1,0 +1,174 @@
+use anyhow::{Context, Result};
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub database_url: String,
+    pub listen_addr: String,
+    pub jwt_private_key_path: String,
+    pub jwt_public_key_path: String,
+    pub totp_encryption_key: String,
+    pub file_storage_path: String,
+    pub max_file_size_mb: u64,
+    pub github_api_token: Option<String>,
+    pub github_repo_owner: Option<String>,
+    pub github_repo_name: Option<String>,
+    pub admin_username: Option<String>,
+    pub registration_mode: String,
+    pub community_creation_mode: String,
+    pub public_url: Option<String>,
+    /// ICE servers for WebRTC (JSON array of {urls, username?, credential?}).
+    pub ice_servers_json: Option<String>,
+    /// VAPID private key for Web Push (base64 URL-safe encoded).
+    pub vapid_private_key: Option<String>,
+    /// VAPID public key for Web Push (base64 URL-safe encoded).
+    pub vapid_public_key: Option<String>,
+    /// Per-user upload quota in MB (0 = unlimited). Default 500 MB.
+    pub upload_quota_mb: u64,
+    /// OIDC issuer URL (e.g. https://auth.example.com/application/o/ts/)
+    pub oidc_issuer_url: Option<String>,
+    /// OIDC client ID
+    pub oidc_client_id: Option<String>,
+    /// OIDC client secret
+    pub oidc_client_secret: Option<String>,
+    /// OIDC redirect URI (e.g. https://ts.example.com/api/auth/oidc/callback)
+    pub oidc_redirect_uri: Option<String>,
+    /// If true, disable password-based login (force SSO)
+    pub oidc_disable_password_login: bool,
+}
+
+impl Config {
+    /// Returns true if all required OIDC configuration is present.
+    pub fn oidc_enabled(&self) -> bool {
+        self.oidc_issuer_url.is_some()
+            && self.oidc_client_id.is_some()
+            && self.oidc_client_secret.is_some()
+            && self.oidc_redirect_uri.is_some()
+    }
+
+    pub fn from_env() -> Result<Self> {
+        let oidc_issuer_url = std::env::var("OIDC_ISSUER_URL").ok().filter(|s| !s.is_empty());
+        let oidc_client_id = std::env::var("OIDC_CLIENT_ID").ok().filter(|s| !s.is_empty());
+        let oidc_client_secret = std::env::var("OIDC_CLIENT_SECRET").ok().filter(|s| !s.is_empty());
+        let oidc_redirect_uri = std::env::var("OIDC_REDIRECT_URI").ok().filter(|s| !s.is_empty());
+        let oidc_disable_password_login = std::env::var("OIDC_DISABLE_PASSWORD_LOGIN")
+            .unwrap_or_else(|_| "false".to_string())
+            .eq_ignore_ascii_case("true");
+        let max_file_size_mb = std::env::var("MAX_FILE_SIZE_MB")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse()
+            .unwrap_or(100u64)
+            .clamp(1, 10_000);
+
+        let registration_mode = std::env::var("REGISTRATION_MODE")
+            .unwrap_or_else(|_| "invite_only".to_string());
+        let registration_mode = match registration_mode.as_str() {
+            "open" | "invite_only" | "closed" => registration_mode,
+            other => {
+                tracing::warn!(
+                    "Invalid REGISTRATION_MODE '{other}', falling back to 'invite_only'"
+                );
+                "invite_only".to_string()
+            }
+        };
+
+        let community_creation_mode = std::env::var("COMMUNITY_CREATION_MODE")
+            .unwrap_or_else(|_| "admin_only".to_string());
+        let community_creation_mode = match community_creation_mode.as_str() {
+            "open" | "admin_only" => community_creation_mode,
+            other => {
+                tracing::warn!(
+                    "Invalid COMMUNITY_CREATION_MODE '{other}', falling back to 'admin_only'"
+                );
+                "admin_only".to_string()
+            }
+        };
+
+        let ice_servers_json = std::env::var("ICE_SERVERS").ok();
+        if let Some(ref json) = ice_servers_json
+            && serde_json::from_str::<serde_json::Value>(json).is_err()
+        {
+            tracing::warn!("ICE_SERVERS is not valid JSON, will be ignored");
+        }
+
+        let upload_quota_mb = std::env::var("UPLOAD_QUOTA_MB")
+            .unwrap_or_else(|_| "500".to_string())
+            .parse()
+            .unwrap_or(500u64)
+            .clamp(0, 100_000);
+
+        let cfg = Self {
+            database_url: {
+                let mut url = std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
+                // If DATABASE_URL contains the placeholder __DB_PASSWORD__, replace it
+                // with the value from the Docker secret file. This allows the connection
+                // string to be set via env while keeping the password in a secret.
+                if url.contains("__DB_PASSWORD__") {
+                    if let Ok(pw) = std::fs::read_to_string("/run/secrets/db_password") {
+                        url = url.replace("__DB_PASSWORD__", pw.trim());
+                    } else {
+                        tracing::warn!(
+                            "DATABASE_URL contains __DB_PASSWORD__ placeholder but /run/secrets/db_password is not available"
+                        );
+                    }
+                }
+                url
+            },
+            listen_addr: std::env::var("LISTEN_ADDR")
+                .unwrap_or_else(|_| "0.0.0.0:8080".to_string()),
+            jwt_private_key_path: std::env::var("JWT_PRIVATE_KEY_PATH")
+                .unwrap_or_else(|_| "./secrets/jwt_private.pem".to_string()),
+            jwt_public_key_path: std::env::var("JWT_PUBLIC_KEY_PATH")
+                .unwrap_or_else(|_| "./secrets/jwt_public.pem".to_string()),
+            totp_encryption_key: {
+                let mut key = std::env::var("TOTP_ENCRYPTION_KEY").unwrap_or_default();
+                // Fall back to Docker secret file if env var is empty
+                if key.is_empty() {
+                    if let Ok(secret) = std::fs::read_to_string("/run/secrets/totp_encryption_key") {
+                        key = secret.trim().to_string();
+                    }
+                }
+                key
+            },
+            file_storage_path: std::env::var("FILE_STORAGE_PATH")
+                .unwrap_or_else(|_| "./data/files".to_string()),
+            max_file_size_mb,
+            github_api_token: std::env::var("GITHUB_API_TOKEN").ok(),
+            github_repo_owner: std::env::var("GITHUB_REPO_OWNER").ok(),
+            github_repo_name: std::env::var("GITHUB_REPO_NAME").ok(),
+            admin_username: std::env::var("ADMIN_USERNAME").ok(),
+            registration_mode,
+            community_creation_mode,
+            public_url: std::env::var("PUBLIC_URL").ok(),
+            ice_servers_json,
+            vapid_private_key: std::env::var("VAPID_PRIVATE_KEY").ok(),
+            vapid_public_key: std::env::var("VAPID_PUBLIC_KEY").ok(),
+            upload_quota_mb,
+            oidc_issuer_url,
+            oidc_client_id,
+            oidc_client_secret,
+            oidc_redirect_uri,
+            oidc_disable_password_login,
+        };
+        cfg.validate_secrets()?;
+        Ok(cfg)
+    }
+
+    /// Refuse to start with a missing, weak or placeholder TOTP encryption key.
+    /// An empty key would derive a publicly known encryption key, which defeats
+    /// encryption of 2FA secrets at rest.
+    fn validate_secrets(&self) -> Result<()> {
+        let key = self.totp_encryption_key.trim();
+        if key.is_empty() {
+            anyhow::bail!(
+                "TOTP_ENCRYPTION_KEY is not set. Generate one with `openssl rand -hex 32`"
+            );
+        }
+        if key.len() < 32 {
+            anyhow::bail!("TOTP_ENCRYPTION_KEY must be at least 32 characters");
+        }
+        if key.to_ascii_lowercase().contains("change_me") {
+            anyhow::bail!("TOTP_ENCRYPTION_KEY still contains the example placeholder");
+        }
+        Ok(())
+    }
+}

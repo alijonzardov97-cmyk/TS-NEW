@@ -1,0 +1,656 @@
+use std::sync::Arc;
+
+use axum::extract::{Path, Query, State};
+use axum::routing::{get, patch, post};
+use axum::{Extension, Json, Router};
+use ts_common::ws_messages::ServerMessage;
+use uuid::Uuid;
+
+use ts_common::api_types::{
+    BanRequest, ChannelMemberResponse, ChannelResponse, CreateChannelRequest, PaginationQuery,
+    TransferOwnershipRequest, UpdateChannelRequest, UpdateRoleRequest,
+};
+use ts_db::models::channel::ChannelType;
+use ts_db::repos::{channel_repo, community_repo, group_repo, sender_key_repo, unread_repo, user_repo, voice_repo};
+
+use crate::app_state::AppState;
+use crate::error::AppError;
+use crate::middleware::auth::AccessClaims;
+use crate::permissions;
+
+pub fn routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/channels", get(list_channels).post(create_channel))
+        .route("/channels/{id}", get(get_channel).patch(update_channel))
+        .route("/channels/{id}/join", post(join_channel))
+        .route("/channels/{id}/leave", post(leave_channel))
+        .route("/channels/{id}/members", get(list_channel_members))
+        .route(
+            "/channels/{id}/members/{user_id}/role",
+            patch(update_member_role),
+        )
+        .route("/channels/{id}/members/{user_id}/kick", post(kick_member))
+        .route("/channels/{id}/members/{user_id}/ban", post(ban_member))
+        .route("/channels/{id}/members/{user_id}/unban", post(unban_member))
+        .route(
+            "/channels/{id}/transfer-ownership",
+            post(transfer_ownership),
+        )
+        .route("/channels/unread", get(get_unread_counts))
+        .route("/channels/{id}/read-cursors", get(get_read_cursors))
+}
+
+async fn create_channel(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Json(req): Json<CreateChannelRequest>,
+) -> Result<Json<ChannelResponse>, AppError> {
+    let channel_type = match req.channel_type.as_str() {
+        "text" => ChannelType::Text,
+        "voice" => ChannelType::Voice,
+        "gallery" => ChannelType::Gallery,
+        _ => return Err(AppError::Validation("invalid channel type".to_string())),
+    };
+
+    let name = req.name.trim();
+    if name.is_empty() || name.len() > 64 {
+        return Err(AppError::Validation(
+            "channel name must be 1-64 characters".to_string(),
+        ));
+    }
+
+    let topic = req.topic.as_deref().map(str::trim);
+    if let Some(t) = topic
+        && t.len() > 512
+    {
+        return Err(AppError::Validation(
+            "topic must be at most 512 characters".to_string(),
+        ));
+    }
+
+    // If assigning to a group, verify user is a community member
+    if let Some(group_id) = req.group_id {
+        let group = group_repo::get_group(&state.db, group_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("group not found".to_string()))?;
+        if !community_repo::is_community_member(&state.db, group.community_id, claims.sub).await? {
+            return Err(AppError::Forbidden);
+        }
+    }
+
+    let id = Uuid::now_v7();
+    let channel = channel_repo::create_channel(
+        &state.db,
+        id,
+        name,
+        channel_type,
+        topic,
+        claims.sub,
+        req.group_id,
+        req.discoverable,
+    )
+    .await?;
+
+    Ok(Json(channel_to_response(&channel)))
+}
+
+async fn list_channels(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+) -> Result<Json<Vec<ChannelResponse>>, AppError> {
+    let channels = channel_repo::list_user_channels(&state.db, claims.sub).await?;
+    Ok(Json(channels.iter().map(channel_to_response).collect()))
+}
+
+async fn get_channel(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ChannelResponse>, AppError> {
+    // Verify membership
+    if !channel_repo::is_member(&state.db, id, claims.sub).await? {
+        return Err(AppError::Forbidden);
+    }
+
+    let channel = channel_repo::get_channel(&state.db, id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("channel not found".to_string()))?;
+
+    Ok(Json(channel_to_response(&channel)))
+}
+
+async fn update_channel(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateChannelRequest>,
+) -> Result<Json<ChannelResponse>, AppError> {
+    // Must be channel owner (or instance owner/admin) to update settings
+    let channel_role = channel_repo::get_member_role(&state.db, id, claims.sub).await?;
+    let role = permissions::effective_role(channel_role.as_deref(), claims.is_owner, claims.is_admin);
+
+    if !permissions::can_manage_roles(&role) {
+        return Err(AppError::Forbidden);
+    }
+
+    let name = req.name.as_deref().map(str::trim);
+    let topic = req.topic.as_deref().map(str::trim);
+
+    if let Some(n) = name
+        && (n.is_empty() || n.len() > 64)
+    {
+        return Err(AppError::Validation(
+            "channel name must be 1-64 characters".to_string(),
+        ));
+    }
+
+    if let Some(t) = topic
+        && t.len() > 512
+    {
+        return Err(AppError::Validation(
+            "topic must be at most 512 characters".to_string(),
+        ));
+    }
+
+    if let Some(sms) = req.slow_mode_seconds
+        && !(0..=86400).contains(&sms)
+    {
+        return Err(AppError::Validation(
+            "slow_mode_seconds must be between 0 and 86400".to_string(),
+        ));
+    }
+
+    if let Some(ttl) = req.message_ttl_seconds
+        && !(0..=2_592_000).contains(&ttl)
+    {
+        return Err(AppError::Validation(
+            "message_ttl_seconds must be between 0 and 2592000 (30 days)".to_string(),
+        ));
+    }
+
+    if let Some(ref bg) = req.voice_background
+        && !bg.is_empty()
+    {
+        super::account::validate_avatar_url(bg)?;
+    }
+
+    let channel = channel_repo::update_channel(
+        &state.db,
+        id,
+        name,
+        topic,
+        req.read_only,
+        req.slow_mode_seconds,
+        req.message_ttl_seconds
+            .map(|v| if v == 0 { None } else { Some(v) }),
+        req.discoverable,
+        req.archived,
+        req.voice_background.as_deref(),
+    )
+    .await?
+    .ok_or_else(|| AppError::NotFound("channel not found".to_string()))?;
+
+    // Broadcast channel settings change to channel members only
+    state.connections.broadcast_to_channel(channel.id, ServerMessage::ChannelUpdated {
+        channel_id: channel.id,
+        name: channel.name.clone(),
+        topic: channel.topic.clone(),
+        read_only: channel.read_only,
+        slow_mode_seconds: channel.slow_mode_seconds,
+        archived: channel.archived,
+        voice_background: channel.voice_background.clone(),
+    });
+
+    Ok(Json(channel_to_response(&channel)))
+}
+
+async fn join_channel(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path(id): Path<Uuid>,
+) -> Result<(), AppError> {
+    // Verify channel exists
+    let channel = channel_repo::get_channel(&state.db, id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("channel not found".to_string()))?;
+
+    // If channel belongs to a group, verify user is a community member
+    if let Some(group_id) = channel.group_id {
+        let group = group_repo::get_group(&state.db, group_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("group not found".to_string()))?;
+        if !community_repo::is_community_member(&state.db, group.community_id, claims.sub).await? {
+            return Err(AppError::Forbidden);
+        }
+    }
+
+    // Check if user is banned
+    if channel_repo::is_banned(&state.db, id, claims.sub).await? {
+        return Err(AppError::Forbidden);
+    }
+
+    channel_repo::join_channel(&state.db, id, claims.sub).await?;
+    Ok(())
+}
+
+async fn leave_channel(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path(id): Path<Uuid>,
+) -> Result<(), AppError> {
+    // Prevent the owner from leaving (would orphan the channel)
+    if let Some(role) = channel_repo::get_member_role(&state.db, id, claims.sub).await?
+        && role == "owner"
+    {
+        return Err(AppError::Validation(
+            "owner cannot leave; transfer ownership or delete the channel instead".to_string(),
+        ));
+    }
+
+    channel_repo::leave_channel(&state.db, id, claims.sub).await?;
+    Ok(())
+}
+
+async fn list_channel_members(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path(id): Path<Uuid>,
+    Query(pagination): Query<PaginationQuery>,
+) -> Result<Json<Vec<ChannelMemberResponse>>, AppError> {
+    let channel = channel_repo::get_channel(&state.db, id)
+        .await?
+        .ok_or(AppError::NotFound("channel not found".into()))?;
+
+    // For discoverable channels, group members can also view the member list.
+    let is_channel_member = channel_repo::is_member(&state.db, id, claims.sub).await?;
+    if !is_channel_member {
+        let allowed = if channel.discoverable {
+            if let Some(group_id) = channel.group_id {
+                group_repo::is_member(&state.db, group_id, claims.sub).await?
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if !allowed {
+            return Err(AppError::Forbidden);
+        }
+    }
+
+    let limit = pagination.limit.unwrap_or(200).clamp(1, 500);
+    let offset = pagination.offset.unwrap_or(0).max(0);
+
+    let members = if channel.discoverable {
+        if let Some(group_id) = channel.group_id {
+            channel_repo::list_discoverable_channel_members(&state.db, id, group_id, limit, offset)
+                .await?
+        } else {
+            channel_repo::list_members_with_users(&state.db, id, limit, offset).await?
+        }
+    } else {
+        channel_repo::list_members_with_users(&state.db, id, limit, offset).await?
+    };
+
+    let response: Vec<ChannelMemberResponse> = members
+        .into_iter()
+        .map(|m| ChannelMemberResponse {
+            user_id: m.user_id,
+            username: m.username,
+            display_name: m.display_name,
+            avatar_url: m.avatar_url,
+            role: m.role,
+            joined_at: m.joined_at.to_rfc3339(),
+        })
+        .collect();
+
+    Ok(Json(response))
+}
+
+async fn update_member_role(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path((channel_id, target_user_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<UpdateRoleRequest>,
+) -> Result<(), AppError> {
+    let channel_role = channel_repo::get_member_role(&state.db, channel_id, claims.sub).await?;
+    let actor_role = permissions::effective_role(channel_role.as_deref(), claims.is_owner, claims.is_admin);
+
+    if !permissions::can_manage_roles(&actor_role) {
+        return Err(AppError::Forbidden);
+    }
+
+    if target_user_id == claims.sub {
+        return Err(AppError::Validation(
+            "cannot change your own role".to_string(),
+        ));
+    }
+
+    if !matches!(req.role.as_str(), "admin" | "moderator" | "member") {
+        return Err(AppError::Validation(
+            "role must be 'admin', 'moderator', or 'member'".to_string(),
+        ));
+    }
+
+    if !channel_repo::update_member_role(&state.db, channel_id, target_user_id, &req.role).await? {
+        return Err(AppError::NotFound("member not found".to_string()));
+    }
+
+    state.connections.broadcast_to_channel(
+        channel_id,
+        ServerMessage::MemberRoleUpdated {
+            channel_id,
+            user_id: target_user_id,
+            role: req.role,
+        },
+    );
+
+    Ok(())
+}
+
+async fn kick_member(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path((channel_id, target_user_id)): Path<(Uuid, Uuid)>,
+) -> Result<(), AppError> {
+    let channel_role = channel_repo::get_member_role(&state.db, channel_id, claims.sub).await?;
+    let actor_role = permissions::effective_role(channel_role.as_deref(), claims.is_owner, claims.is_admin);
+
+    let target_role = channel_repo::get_member_role(&state.db, channel_id, target_user_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("member not found".to_string()))?;
+
+    if !permissions::can_moderate(&actor_role, &target_role) {
+        return Err(AppError::Forbidden);
+    }
+
+    channel_repo::leave_channel(&state.db, channel_id, target_user_id).await?;
+
+    state.connections.broadcast_to_channel(
+        channel_id,
+        ServerMessage::MemberKicked {
+            channel_id,
+            user_id: target_user_id,
+            kicked_by: claims.sub,
+        },
+    );
+
+    // Clean up voice session if the kicked user was in a call
+    if let Ok(Some(session)) = voice_repo::get_active_session(&state.db, channel_id).await {
+        let _ = voice_repo::leave_session(&state.db, session.id, target_user_id).await;
+        state.connections.broadcast_to_channel(
+            channel_id,
+            ServerMessage::UserLeftVoice {
+                channel_id,
+                user_id: target_user_id,
+            },
+        );
+        if let Ok(participants) = voice_repo::get_participants(&state.db, session.id).await {
+            state.connections.broadcast_to_channel(
+                channel_id,
+                ServerMessage::VoiceStateUpdate {
+                    channel_id,
+                    participants: participants.clone(),
+                },
+            );
+            if participants.is_empty() {
+                let _ = voice_repo::end_session(&state.db, session.id).await;
+            }
+        }
+    }
+
+    // Delete kicked user's sender key and trigger rotation for remaining members
+    let _ = sender_key_repo::delete_distribution(&state.db, channel_id, target_user_id).await;
+    state.connections.broadcast_to_channel(
+        channel_id,
+        ServerMessage::SenderKeyRotationRequired {
+            channel_id,
+            reason: "member_removed".to_string(),
+        },
+    );
+
+    user_repo::insert_audit_log(
+        &state.db,
+        Uuid::now_v7(),
+        Some(claims.sub),
+        "channel_kick",
+        None,
+        None,
+        Some(serde_json::json!({
+            "channel_id": channel_id,
+            "target_user_id": target_user_id,
+        })),
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn ban_member(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path((channel_id, target_user_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<BanRequest>,
+) -> Result<(), AppError> {
+    if let Some(ref reason) = req.reason
+        && reason.len() > 500
+    {
+        return Err(AppError::Validation(
+            "ban reason must be at most 500 characters".to_string(),
+        ));
+    }
+
+    let channel_role = channel_repo::get_member_role(&state.db, channel_id, claims.sub).await?;
+    let actor_role = permissions::effective_role(channel_role.as_deref(), claims.is_owner, claims.is_admin);
+
+    let target_role = channel_repo::get_member_role(&state.db, channel_id, target_user_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("member not found".to_string()))?;
+
+    if !permissions::can_moderate(&actor_role, &target_role) {
+        return Err(AppError::Forbidden);
+    }
+
+    channel_repo::ban_user(
+        &state.db,
+        channel_id,
+        target_user_id,
+        claims.sub,
+        req.reason.as_deref(),
+    )
+    .await?;
+
+    state.connections.broadcast_to_channel(
+        channel_id,
+        ServerMessage::MemberBanned {
+            channel_id,
+            user_id: target_user_id,
+            banned_by: claims.sub,
+        },
+    );
+
+    // Clean up voice session if the banned user was in a call
+    if let Ok(Some(session)) = voice_repo::get_active_session(&state.db, channel_id).await {
+        let _ = voice_repo::leave_session(&state.db, session.id, target_user_id).await;
+        state.connections.broadcast_to_channel(
+            channel_id,
+            ServerMessage::UserLeftVoice {
+                channel_id,
+                user_id: target_user_id,
+            },
+        );
+        if let Ok(participants) = voice_repo::get_participants(&state.db, session.id).await {
+            state.connections.broadcast_to_channel(
+                channel_id,
+                ServerMessage::VoiceStateUpdate {
+                    channel_id,
+                    participants: participants.clone(),
+                },
+            );
+            if participants.is_empty() {
+                let _ = voice_repo::end_session(&state.db, session.id).await;
+            }
+        }
+    }
+
+    // Delete banned user's sender key and trigger rotation for remaining members
+    let _ = sender_key_repo::delete_distribution(&state.db, channel_id, target_user_id).await;
+    state.connections.broadcast_to_channel(
+        channel_id,
+        ServerMessage::SenderKeyRotationRequired {
+            channel_id,
+            reason: "member_removed".to_string(),
+        },
+    );
+
+    user_repo::insert_audit_log(
+        &state.db,
+        Uuid::now_v7(),
+        Some(claims.sub),
+        "channel_ban",
+        None,
+        None,
+        Some(serde_json::json!({
+            "channel_id": channel_id,
+            "target_user_id": target_user_id,
+        })),
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn unban_member(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path((channel_id, target_user_id)): Path<(Uuid, Uuid)>,
+) -> Result<(), AppError> {
+    let channel_role = channel_repo::get_member_role(&state.db, channel_id, claims.sub).await?;
+    let actor_role = permissions::effective_role(channel_role.as_deref(), claims.is_owner, claims.is_admin);
+
+    // Moderators and above can unban
+    if !permissions::can_delete_others_messages(&actor_role) {
+        return Err(AppError::Forbidden);
+    }
+
+    if !channel_repo::unban_user(&state.db, channel_id, target_user_id).await? {
+        return Err(AppError::NotFound("ban not found".to_string()));
+    }
+
+    user_repo::insert_audit_log(
+        &state.db,
+        Uuid::now_v7(),
+        Some(claims.sub),
+        "channel_unban",
+        None,
+        None,
+        Some(serde_json::json!({
+            "channel_id": channel_id,
+            "target_user_id": target_user_id,
+        })),
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn transfer_ownership(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path(channel_id): Path<Uuid>,
+    Json(req): Json<TransferOwnershipRequest>,
+) -> Result<(), AppError> {
+    // Only the channel owner (or instance owner/admin) can transfer
+    let channel_role = channel_repo::get_member_role(&state.db, channel_id, claims.sub).await?;
+    let actor_role = permissions::effective_role(channel_role.as_deref(), claims.is_owner, claims.is_admin);
+
+    if !permissions::can_manage_roles(&actor_role) {
+        return Err(AppError::Forbidden);
+    }
+
+    // Target must be a member
+    if !channel_repo::is_member(&state.db, channel_id, req.new_owner_id).await? {
+        return Err(AppError::Validation(
+            "target user must be a member of this channel".to_string(),
+        ));
+    }
+
+    channel_repo::transfer_ownership(&state.db, channel_id, claims.sub, req.new_owner_id).await?;
+
+    // Broadcast role changes for both users
+    state.connections.broadcast_to_channel(
+        channel_id,
+        ServerMessage::MemberRoleUpdated {
+            channel_id,
+            user_id: claims.sub,
+            role: "admin".to_string(),
+        },
+    );
+    state.connections.broadcast_to_channel(
+        channel_id,
+        ServerMessage::MemberRoleUpdated {
+            channel_id,
+            user_id: req.new_owner_id,
+            role: "owner".to_string(),
+        },
+    );
+
+    Ok(())
+}
+
+async fn get_unread_counts(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+) -> Result<Json<Vec<serde_json::Value>>, AppError> {
+    let counts = unread_repo::get_all_unread_counts(&state.db, claims.sub).await?;
+    let result: Vec<serde_json::Value> = counts
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "channel_id": c.channel_id,
+                "unread_count": c.unread_count
+            })
+        })
+        .collect();
+    Ok(Json(result))
+}
+
+async fn get_read_cursors(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<serde_json::Value>>, AppError> {
+    if !channel_repo::is_member(&state.db, id, claims.sub).await? {
+        return Err(AppError::Forbidden);
+    }
+
+    let cursors = unread_repo::get_channel_read_cursors(&state.db, id).await?;
+    let result: Vec<serde_json::Value> = cursors
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "user_id": c.user_id,
+                "last_read_message_id": c.last_read_message_id,
+                "last_read_at": c.last_read_at.to_rfc3339()
+            })
+        })
+        .collect();
+    Ok(Json(result))
+}
+
+fn channel_to_response(ch: &ts_db::models::channel::Channel) -> ChannelResponse {
+    ChannelResponse {
+        id: ch.id,
+        name: ch.name.clone(),
+        channel_type: format!("{:?}", ch.channel_type).to_lowercase(),
+        topic: ch.topic.clone(),
+        created_by: ch.created_by,
+        created_at: ch.created_at.to_rfc3339(),
+        group_id: ch.group_id,
+        read_only: ch.read_only,
+        slow_mode_seconds: ch.slow_mode_seconds,
+        discoverable: ch.discoverable,
+        archived: ch.archived,
+        voice_background: ch.voice_background.clone(),
+    }
+}

@@ -1,0 +1,285 @@
+use std::sync::Arc;
+use std::time::Instant;
+
+use axum::extract::{Path, State};
+use axum::routing::{patch, post};
+use axum::{Extension, Json, Router};
+use uuid::Uuid;
+
+use ts_common::api_types::{
+    CreateWebhookRequest, ExecuteWebhookRequest, UpdateWebhookRequest, WebhookResponse,
+};
+use ts_common::ws_messages::{MessageType, ServerMessage};
+use ts_db::repos::{channel_repo, message_repo, webhook_repo};
+
+use crate::app_state::AppState;
+use crate::error::AppError;
+use crate::middleware::auth::AccessClaims;
+use crate::permissions;
+use crate::routes::account::validate_avatar_url;
+
+/// Protected routes (require auth).
+pub fn routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route(
+            "/channels/{id}/webhooks",
+            post(create_webhook).get(list_webhooks),
+        )
+        .route(
+            "/webhooks/{id}",
+            patch(update_webhook).delete(delete_webhook),
+        )
+}
+
+/// Public route for executing webhooks (no auth — uses token).
+pub fn public_routes() -> Router<Arc<AppState>> {
+    Router::new().route("/webhooks/execute/{token}", post(execute_webhook))
+}
+
+async fn create_webhook(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path(channel_id): Path<Uuid>,
+    Json(req): Json<CreateWebhookRequest>,
+) -> Result<Json<WebhookResponse>, AppError> {
+    // Must be admin/owner of channel
+    let role = channel_repo::get_member_role(&state.db, channel_id, claims.sub)
+        .await?
+        .ok_or(AppError::Forbidden)?;
+
+    if !permissions::can_manage_roles(&role) {
+        return Err(AppError::Forbidden);
+    }
+
+    let name = req.name.trim();
+    if name.is_empty() || name.len() > 64 {
+        return Err(AppError::Validation(
+            "webhook name must be 1-64 characters".into(),
+        ));
+    }
+
+    if let Some(ref url) = req.avatar_url {
+        validate_avatar_url(url)?;
+    }
+
+    let id = Uuid::now_v7();
+    let token = generate_token();
+
+    let webhook = webhook_repo::create(
+        &state.db,
+        id,
+        channel_id,
+        name,
+        &token,
+        claims.sub,
+        req.avatar_url.as_deref(),
+    )
+    .await?;
+
+    Ok(Json(webhook_to_response(&webhook, true)))
+}
+
+async fn list_webhooks(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path(channel_id): Path<Uuid>,
+) -> Result<Json<Vec<WebhookResponse>>, AppError> {
+    let role = channel_repo::get_member_role(&state.db, channel_id, claims.sub)
+        .await?
+        .ok_or(AppError::Forbidden)?;
+
+    if !permissions::can_manage_roles(&role) {
+        return Err(AppError::Forbidden);
+    }
+
+    let webhooks = webhook_repo::list_for_channel(&state.db, channel_id).await?;
+    Ok(Json(
+        webhooks
+            .iter()
+            .map(|w| webhook_to_response(w, false))
+            .collect(),
+    ))
+}
+
+async fn update_webhook(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path(webhook_id): Path<Uuid>,
+    Json(req): Json<UpdateWebhookRequest>,
+) -> Result<Json<WebhookResponse>, AppError> {
+    let webhook = webhook_repo::get_by_id(&state.db, webhook_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("webhook not found".into()))?;
+
+    let role = channel_repo::get_member_role(&state.db, webhook.channel_id, claims.sub)
+        .await?
+        .ok_or(AppError::Forbidden)?;
+
+    if !permissions::can_manage_roles(&role) {
+        return Err(AppError::Forbidden);
+    }
+
+    if let Some(ref name) = req.name {
+        let trimmed = name.trim();
+        if trimmed.is_empty() || trimmed.len() > 64 {
+            return Err(AppError::Validation(
+                "webhook name must be 1-64 characters".into(),
+            ));
+        }
+    }
+
+    if let Some(Some(ref url)) = req.avatar_url {
+        validate_avatar_url(url)?;
+    }
+
+    let updated = webhook_repo::update(
+        &state.db,
+        webhook_id,
+        req.name.as_deref(),
+        req.avatar_url.as_ref().map(|v| v.as_deref()),
+        req.active,
+    )
+    .await?
+    .ok_or_else(|| AppError::NotFound("webhook not found".into()))?;
+
+    Ok(Json(webhook_to_response(&updated, false)))
+}
+
+async fn delete_webhook(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<AccessClaims>,
+    Path(webhook_id): Path<Uuid>,
+) -> Result<(), AppError> {
+    let webhook = webhook_repo::get_by_id(&state.db, webhook_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("webhook not found".into()))?;
+
+    let role = channel_repo::get_member_role(&state.db, webhook.channel_id, claims.sub)
+        .await?
+        .ok_or(AppError::Forbidden)?;
+
+    if !permissions::can_manage_roles(&role) {
+        return Err(AppError::Forbidden);
+    }
+
+    webhook_repo::delete(&state.db, webhook_id).await?;
+    Ok(())
+}
+
+/// Per-webhook rate limiter: max 1 message per second per token.
+static WEBHOOK_RATE: std::sync::LazyLock<dashmap::DashMap<String, Instant>> =
+    std::sync::LazyLock::new(dashmap::DashMap::new);
+/// Track when we last evicted stale webhook rate entries.
+static WEBHOOK_RATE_LAST_CLEANUP: std::sync::LazyLock<std::sync::Mutex<Instant>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(Instant::now()));
+
+async fn execute_webhook(
+    State(state): State<Arc<AppState>>,
+    Path(token): Path<String>,
+    Json(req): Json<ExecuteWebhookRequest>,
+) -> Result<(), AppError> {
+    // Per-webhook rate limit: 1 message/second
+    {
+        let now = Instant::now();
+        if let Some(last) = WEBHOOK_RATE.get(&token)
+            && now.duration_since(*last).as_secs_f64() < 1.0
+        {
+            return Err(AppError::Validation("webhook rate limited (max 1 msg/sec)".into()));
+        }
+        WEBHOOK_RATE.insert(token.clone(), now);
+
+        // Periodically evict stale entries (every 5 minutes) to prevent unbounded growth
+        if let Ok(mut last_cleanup) = WEBHOOK_RATE_LAST_CLEANUP.try_lock()
+            && now.duration_since(*last_cleanup).as_secs() > 300
+        {
+            WEBHOOK_RATE.retain(|_, ts| now.duration_since(*ts).as_secs() < 60);
+            *last_cleanup = now;
+        }
+    }
+
+    let webhook = webhook_repo::get_by_token(&state.db, &token)
+        .await?
+        .ok_or_else(|| AppError::NotFound("webhook not found or inactive".into()))?;
+
+    if req.content.is_empty() || req.content.len() > 4000 {
+        return Err(AppError::Validation(
+            "content must be 1-4000 characters".into(),
+        ));
+    }
+
+    if let Some(ref u) = req.username
+        && u.len() > 64
+    {
+        return Err(AppError::Validation(
+            "username must be at most 64 characters".into(),
+        ));
+    }
+
+    // Validate avatar_url if provided (same validation as create/update)
+    if let Some(ref url) = req.avatar_url {
+        validate_avatar_url(url)?;
+    }
+
+    let message_id = Uuid::now_v7();
+    let display_name = req.username.as_deref().unwrap_or(&webhook.name);
+    let plaintext = serde_json::json!({
+        "content": req.content,
+        "webhook_name": display_name,
+        "webhook_avatar": req.avatar_url.as_deref().or(webhook.avatar_url.as_deref()),
+    })
+    .to_string();
+
+    let stored =
+        message_repo::create_webhook_message(&state.db, message_id, webhook.channel_id, &plaintext)
+            .await?;
+
+    // Broadcast to channel
+    state.connections.broadcast_to_channel(
+        webhook.channel_id,
+        ServerMessage::NewMessage {
+            id: message_id,
+            channel_id: webhook.channel_id,
+            sender_id: webhook.created_by,
+            ciphertext: vec![0],
+            nonce: vec![0],
+            message_type: MessageType::Webhook,
+            reply_to: None,
+            sender_key_id: None,
+            created_at: stored.created_at.to_rfc3339(),
+            thread_id: None,
+        },
+    );
+
+    Ok(())
+}
+
+fn webhook_to_response(
+    w: &ts_db::models::webhook::Webhook,
+    include_token: bool,
+) -> WebhookResponse {
+    WebhookResponse {
+        id: w.id,
+        channel_id: w.channel_id,
+        name: w.name.clone(),
+        token: if include_token {
+            Some(w.token.clone())
+        } else {
+            None
+        },
+        avatar_url: w.avatar_url.clone(),
+        active: w.active,
+        created_at: w.created_at.to_rfc3339(),
+    }
+}
+
+fn generate_token() -> String {
+    use rand::Rng as _;
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut rng = rand::thread_rng();
+    (0..64)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect()
+}

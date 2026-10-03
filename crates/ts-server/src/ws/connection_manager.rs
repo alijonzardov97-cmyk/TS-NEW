@@ -1,0 +1,251 @@
+use dashmap::DashMap;
+use tokio::sync::{broadcast, mpsc};
+use uuid::Uuid;
+
+use ts_common::ws_messages::ServerMessage;
+
+/// Handle to a connected WebSocket session.
+#[derive(Debug, Clone)]
+pub struct SessionHandle {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub tx: mpsc::UnboundedSender<ServerMessage>,
+}
+
+/// Per-user token bucket for cross-session rate limiting.
+pub struct UserRateBucket {
+    pub tokens: f64,
+    pub last_refill: tokio::time::Instant,
+}
+
+/// Per-user rate limit: 30 msg/s sustained, burst of 60.
+/// This limits a single user across ALL their WebSocket sessions.
+const USER_RATE_LIMIT_BURST: f64 = 60.0;
+const USER_RATE_LIMIT_REFILL: f64 = 30.0;
+
+/// Manages all active WebSocket connections and channel subscriptions.
+pub struct ConnectionManager {
+    /// user_id -> list of active sessions (supports multi-device)
+    connections: DashMap<Uuid, Vec<SessionHandle>>,
+    /// channel_id -> broadcast sender for real-time messages
+    channel_senders: DashMap<Uuid, broadcast::Sender<ServerMessage>>,
+    /// (channel_id, user_id) -> last typing timestamp (for timeout cleanup)
+    typing_state: DashMap<(Uuid, Uuid), tokio::time::Instant>,
+    /// user_id -> last reaction timestamp (per-user, not per-connection)
+    reaction_cooldowns: DashMap<Uuid, tokio::time::Instant>,
+    /// user_id -> last voice join/leave timestamp (2s cooldown)
+    voice_cooldowns: DashMap<Uuid, tokio::time::Instant>,
+    /// Per-user message rate limiter (token bucket, shared across all sessions).
+    /// Prevents a single user from flooding via multiple concurrent connections.
+    user_rate_limits: DashMap<Uuid, UserRateBucket>,
+}
+
+/// Maximum concurrent WebSocket sessions per user (multi-device support).
+const MAX_SESSIONS_PER_USER: usize = 8;
+
+impl ConnectionManager {
+    pub fn new() -> Self {
+        Self {
+            connections: DashMap::new(),
+            channel_senders: DashMap::new(),
+            typing_state: DashMap::new(),
+            reaction_cooldowns: DashMap::new(),
+            voice_cooldowns: DashMap::new(),
+            user_rate_limits: DashMap::new(),
+        }
+    }
+
+    /// Check per-user cross-session rate limit. Returns true if the message is
+    /// allowed, false if the user has exceeded 30 msg/s (burst 60) across all
+    /// their concurrent WebSocket sessions.
+    pub fn check_user_rate_limit(&self, user_id: Uuid) -> bool {
+        let now = tokio::time::Instant::now();
+        let mut entry = self.user_rate_limits.entry(user_id).or_insert_with(|| {
+            UserRateBucket {
+                tokens: USER_RATE_LIMIT_BURST,
+                last_refill: now,
+            }
+        });
+        let elapsed = now.duration_since(entry.last_refill).as_secs_f64();
+        entry.tokens = (entry.tokens + elapsed * USER_RATE_LIMIT_REFILL).min(USER_RATE_LIMIT_BURST);
+        entry.last_refill = now;
+        if entry.tokens < 1.0 {
+            return false;
+        }
+        entry.tokens -= 1.0;
+        true
+    }
+
+    /// Check per-user reaction cooldown (200ms). Returns true if allowed.
+    pub fn check_reaction_cooldown(&self, user_id: Uuid) -> bool {
+        let now = tokio::time::Instant::now();
+        let mut entry = self.reaction_cooldowns.entry(user_id).or_insert_with(|| {
+            now - tokio::time::Duration::from_secs(1)
+        });
+        if now.duration_since(*entry) < tokio::time::Duration::from_millis(200) {
+            return false;
+        }
+        *entry = now;
+        true
+    }
+
+    /// Check per-user voice join/leave cooldown (2s). Returns true if allowed.
+    pub fn check_voice_cooldown(&self, user_id: Uuid) -> bool {
+        let now = tokio::time::Instant::now();
+        let mut entry = self.voice_cooldowns.entry(user_id).or_insert_with(|| {
+            now - tokio::time::Duration::from_secs(5)
+        });
+        if now.duration_since(*entry) < tokio::time::Duration::from_secs(2) {
+            return false;
+        }
+        *entry = now;
+        true
+    }
+
+    /// Register a new WebSocket session.
+    /// Returns false if the user has too many active sessions.
+    pub fn add_session(&self, handle: SessionHandle) -> bool {
+        let mut entry = self.connections.entry(handle.user_id).or_default();
+        if entry.len() >= MAX_SESSIONS_PER_USER {
+            return false;
+        }
+        entry.push(handle);
+        true
+    }
+
+    /// Remove a WebSocket session.
+    pub fn remove_session(&self, user_id: Uuid, session_id: Uuid) {
+        if let Some(mut sessions) = self.connections.get_mut(&user_id) {
+            sessions.retain(|s| s.session_id != session_id);
+            if sessions.is_empty() {
+                drop(sessions);
+                self.connections.remove(&user_id);
+                // Clean up per-user rate limit state when the last session disconnects
+                self.user_rate_limits.remove(&user_id);
+            }
+        }
+    }
+
+    /// Check if a user has any active connections.
+    pub fn is_online(&self, user_id: &Uuid) -> bool {
+        self.connections.contains_key(user_id)
+    }
+
+    /// Send a message directly to all sessions of a specific user.
+    pub fn send_to_user(&self, user_id: &Uuid, message: &ServerMessage) {
+        if let Some(sessions) = self.connections.get(user_id) {
+            for session in sessions.iter() {
+                let _ = session.tx.send(message.clone());
+            }
+        }
+    }
+
+    /// Get or create a broadcast channel for a chat channel.
+    pub fn get_channel_sender(&self, channel_id: Uuid) -> broadcast::Sender<ServerMessage> {
+        self.channel_senders
+            .entry(channel_id)
+            .or_insert_with(|| {
+                let (tx, _) = broadcast::channel(1024);
+                tx
+            })
+            .clone()
+    }
+
+    /// Subscribe to a channel's broadcast.
+    pub fn subscribe_channel(&self, channel_id: Uuid) -> broadcast::Receiver<ServerMessage> {
+        self.get_channel_sender(channel_id).subscribe()
+    }
+
+    /// Broadcast a message to all subscribers of a channel.
+    pub fn broadcast_to_channel(&self, channel_id: Uuid, message: ServerMessage) {
+        let sender = self.get_channel_sender(channel_id);
+        if let Err(e) = sender.send(message) {
+            // Only log if there were actually receivers (lagged = capacity exhausted)
+            // SendError means no receivers at all, which is normal
+            tracing::trace!(%channel_id, "broadcast_to_channel: no receivers — {e}");
+        }
+    }
+
+    /// Broadcast a message to a specific set of users (e.g. community members).
+    pub fn broadcast_to_users(&self, user_ids: &[Uuid], message: ServerMessage) {
+        for uid in user_ids {
+            if let Some(sessions) = self.connections.get(uid) {
+                for session in sessions.iter() {
+                    let _ = session.tx.send(message.clone());
+                }
+            }
+        }
+    }
+
+    /// Broadcast a message to all connected users.
+    pub fn broadcast_all(&self, message: ServerMessage) {
+        for entry in self.connections.iter() {
+            for session in entry.value().iter() {
+                let _ = session.tx.send(message.clone());
+            }
+        }
+    }
+
+    /// Record that a user started typing in a channel.
+    /// Returns `true` if the typing indicator should be broadcast (i.e., enough
+    /// time has elapsed since the last one), `false` to suppress duplicate broadcasts.
+    pub fn set_typing(&self, channel_id: Uuid, user_id: Uuid) -> bool {
+        let now = tokio::time::Instant::now();
+        let key = (channel_id, user_id);
+        if let Some(prev) = self.typing_state.get(&key)
+            && now.duration_since(*prev) < std::time::Duration::from_secs(3)
+        {
+            return false;
+        }
+        self.typing_state.insert(key, now);
+        true
+    }
+
+    /// Clear typing state for a user in a channel.
+    pub fn clear_typing(&self, channel_id: Uuid, user_id: Uuid) {
+        self.typing_state.remove(&(channel_id, user_id));
+    }
+
+    /// Clear all typing state for a user (on disconnect).
+    pub fn clear_all_typing_for_user(&self, user_id: Uuid) -> Vec<Uuid> {
+        let mut channels = Vec::new();
+        self.typing_state.retain(|(ch_id, uid), _| {
+            if *uid == user_id {
+                channels.push(*ch_id);
+                false
+            } else {
+                true
+            }
+        });
+        channels
+    }
+
+    /// Remove broadcast channels with no active subscribers to reclaim memory.
+    pub fn cleanup_idle_channels(&self) -> usize {
+        let mut removed = 0;
+        self.channel_senders.retain(|_, sender| {
+            if sender.receiver_count() == 0 {
+                removed += 1;
+                false
+            } else {
+                true
+            }
+        });
+        removed
+    }
+
+    /// Remove typing entries older than the timeout and return them.
+    pub fn expire_typing(&self, timeout: std::time::Duration) -> Vec<(Uuid, Uuid)> {
+        let now = tokio::time::Instant::now();
+        let mut expired = Vec::new();
+        self.typing_state.retain(|(ch_id, uid), instant| {
+            if now.duration_since(*instant) > timeout {
+                expired.push((*ch_id, *uid));
+                false
+            } else {
+                true
+            }
+        });
+        expired
+    }
+}

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTTPS only. Only the system trust store is used: user-installed CAs are NOT trusted,
+     which blocks interception by locally installed certificates. Per-server certificate
+     pinning is applied in code (see net/HttpClientFactory). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

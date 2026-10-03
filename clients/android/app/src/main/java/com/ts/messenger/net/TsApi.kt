@@ -1,0 +1,131 @@
+package com.ts.messenger.net
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import okhttp3.CertificatePinner
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import java.io.IOException
+import javax.net.ssl.SSLPeerUnverifiedException
+
+class ApiException(val status: Int, val code: String, message: String) : Exception(message)
+
+/** Raised when the server certificate does not match the saved pins. */
+class CertificateChangedException : Exception("certificate changed")
+
+/** Raised when the device cannot reach the server at all. */
+class NetworkException(cause: Throwable) : Exception(cause)
+
+class ServerProbe(val baseUrl: String, val leafFingerprint: String, val pins: List<String>)
+
+private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+
+val AppJson = Json {
+    ignoreUnknownKeys = true
+    explicitNulls = false
+    encodeDefaults = true
+}
+
+/** Normalises user input into an https base URL, or null if it is not acceptable. */
+fun parseServerUrl(input: String): HttpUrl? {
+    var s = input.trim().trimEnd('/')
+    if (s.isEmpty()) return null
+    if (s.startsWith("http://", ignoreCase = true)) return null // cleartext is never allowed
+    if (!s.startsWith("https://", ignoreCase = true)) s = "https://$s"
+    val url = s.toHttpUrlOrNull() ?: return null
+    if (!url.isHttps || url.username.isNotEmpty() || url.password.isNotEmpty()) return null
+    if (url.encodedPath != "/" || url.query != null || url.fragment != null) return null
+    return url
+}
+
+/**
+ * Talks to the TS server. All requests go through a pinned client; there is deliberately no
+ * way to disable certificate validation.
+ */
+class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
+
+    private fun url(path: String) = baseUrl.newBuilder().encodedPath("/api$path").build()
+
+    private suspend fun <T> call(request: Request, parse: (String) -> T): T =
+        withContext(Dispatchers.IO) {
+            val response: Response = try {
+                client.newCall(request).execute()
+            } catch (e: SSLPeerUnverifiedException) {
+                throw CertificateChangedException()
+            } catch (e: IOException) {
+                throw NetworkException(e)
+            }
+            response.use { r ->
+                // Cap the body so a hostile server cannot exhaust memory.
+                val body = r.body?.source()?.let { src ->
+                    src.request(MAX_BODY_BYTES + 1)
+                    src.buffer.readUtf8(minOf(src.buffer.size, MAX_BODY_BYTES))
+                } ?: ""
+                if (r.isSuccessful) return@use parse(body)
+                val err = runCatching { AppJson.decodeFromString<ErrorEnvelope>(body).error }.getOrNull()
+                throw ApiException(r.code, err?.code ?: "", err?.message ?: "")
+            }
+        }
+
+    suspend fun health(): HealthResponse =
+        call(Request.Builder().url(url("/health")).get().build()) {
+            AppJson.decodeFromString(it)
+        }
+
+    suspend fun config(): ServerConfig =
+        call(Request.Builder().url(url("/auth/config")).get().build()) {
+            AppJson.decodeFromString(it)
+        }
+
+    suspend fun login(req: LoginRequest): AuthResponse =
+        call(post("/auth/login", AppJson.encodeToString(req))) { AppJson.decodeFromString(it) }
+
+    suspend fun register(req: RegisterRequest): AuthResponse =
+        call(post("/auth/register", AppJson.encodeToString(req))) { AppJson.decodeFromString(it) }
+
+    suspend fun refresh(refreshToken: String): TokenResponse =
+        call(post("/auth/refresh", AppJson.encodeToString(RefreshRequest(refreshToken)))) {
+            AppJson.decodeFromString(it)
+        }
+
+    private fun post(path: String, json: String) =
+        Request.Builder().url(url(path)).post(json.toRequestBody(JSON_MEDIA)).build()
+
+    companion object {
+        private const val MAX_BODY_BYTES = 2L * 1024 * 1024
+
+        /**
+         * First contact with a server: performs a normally validated TLS handshake (system trust
+         * store only), checks that it speaks the TS API and returns the certificate fingerprints
+         * so the user can compare them before trusting the server.
+         */
+        suspend fun probe(baseUrl: HttpUrl): ServerProbe = withContext(Dispatchers.IO) {
+            val client = HttpClientFactory.create(null, emptyList())
+            val request = Request.Builder()
+                .url(baseUrl.newBuilder().encodedPath("/api/health").build())
+                .get().build()
+            val response = try {
+                client.newCall(request).execute()
+            } catch (e: IOException) {
+                throw NetworkException(e)
+            }
+            response.use { r ->
+                if (!r.isSuccessful) throw ApiException(r.code, "", "")
+                val body = r.body?.string().orEmpty().take(4096)
+                val health = runCatching { AppJson.decodeFromString<HealthResponse>(body) }.getOrNull()
+                if (health == null || health.status.isEmpty()) throw ApiException(0, "not_ts", "")
+                val certs = r.handshake?.peerCertificates.orEmpty()
+                if (certs.isEmpty()) throw ApiException(0, "no_cert", "")
+                val pins = certs.map { CertificatePinner.pin(it) }
+                ServerProbe(baseUrl.toString().trimEnd('/'), pins.first().removePrefix("sha256/"), pins)
+            }
+        }
+    }
+}
