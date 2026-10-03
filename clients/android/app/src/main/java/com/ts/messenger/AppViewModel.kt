@@ -6,6 +6,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ts.messenger.chat.ChatLog
 import com.ts.messenger.chat.ChatRepository
+import com.ts.messenger.files.FileService
+import com.ts.messenger.files.FileTooLargeException
+import com.ts.messenger.net.FileRef
 import com.ts.messenger.chat.NotConnectedException
 import com.ts.messenger.crypto.ChatCrypto
 import com.ts.messenger.crypto.KeyVault
@@ -77,6 +80,7 @@ data class UiState(
     val searchResults: List<UserPublic> = emptyList(),
     @StringRes val notice: Int? = null,
     val push: PushStatus = PushStatus.Off,
+    val uploading: Boolean = false,
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -93,6 +97,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val chatLog = ChatLog(store)
     private var repo: ChatRepository? = null
+    private var fileSvc: FileService? = null
+    private val thumbs = android.util.LruCache<String, android.graphics.Bitmap>(8)
     private var socket: ChatSocket? = null
     private var chatJob: Job? = null
     private var dmIds: List<String> = emptyList()
@@ -268,6 +274,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             runCatching { UnifiedPush.unregister(app) }
             stopChat()
             store.wipeAll()
+            FileService.wipe(app)
+            thumbs.evictAll()
+            fileSvc = null
             api = null
             baseUrl = null
             pins = emptyList()
@@ -302,7 +311,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             tokenProvider = { a.session?.accessToken() },
             channelIds = { dmIds },
         )
-        val r = ChatRepository(a, ChatCrypto(store, keyVault), chatLog, sock, me.id)
+        val fs = FileService(getApplication<Application>(), a)
+        fileSvc = fs
+        val r = ChatRepository(a, ChatCrypto(store, keyVault), chatLog, sock, me.id, fs)
         repo = r
         socket = sock
         chatJob = viewModelScope.launch {
@@ -450,6 +461,57 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 _state.update { it.copy(error = errorRes(e)) }
             }
+        }
+    }
+
+    fun sendFile(uri: android.net.Uri) {
+        val dm = _state.value.current ?: return
+        val r = repo ?: return
+        val fs = fileSvc ?: return
+        if (_state.value.uploading) return
+        _state.update { it.copy(uploading = true, error = null) }
+        viewModelScope.launch {
+            try {
+                r.sendFile(dm, fs.pick(uri))
+            } catch (e: PeerIdentityChangedException) {
+                _state.update { it.copy(identityAlert = e) }
+            } catch (e: NotConnectedException) {
+                _state.update { it.copy(error = R.string.error_network) }
+            } catch (e: CertificateChangedException) {
+                presentCertChange()
+            } catch (e: FileTooLargeException) {
+                _state.update { it.copy(error = R.string.error_file_too_large) }
+            } catch (e: ApiException) {
+                _state.update { it.copy(error = if (e.status == 413) R.string.error_file_too_large else errorRes(e)) }
+            } catch (e: NetworkException) {
+                _state.update { it.copy(error = R.string.error_network) }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = R.string.error_file_failed) }
+            } finally {
+                _state.update { it.copy(uploading = false) }
+            }
+        }
+    }
+
+    fun saveFile(ref: FileRef, uri: android.net.Uri) {
+        val fs = fileSvc ?: return
+        viewModelScope.launch {
+            try {
+                fs.saveTo(ref, uri)
+                android.widget.Toast.makeText(getApplication<Application>(), R.string.file_saved, android.widget.Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = R.string.error_file_failed) }
+            }
+        }
+    }
+
+    suspend fun loadImage(ref: FileRef): android.graphics.Bitmap? {
+        thumbs.get(ref.id)?.let { return it }
+        val fs = fileSvc ?: return null
+        return try {
+            fs.image(ref)?.also { thumbs.put(ref.id, it) }
+        } catch (e: Exception) {
+            null
         }
     }
 

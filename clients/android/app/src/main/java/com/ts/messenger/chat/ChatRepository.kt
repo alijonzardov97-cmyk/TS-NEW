@@ -3,7 +3,16 @@ package com.ts.messenger.chat
 import com.ts.messenger.crypto.ChatCrypto
 import com.ts.messenger.crypto.PeerIdentityChangedException
 import com.ts.messenger.crypto.toBytes
+import com.ts.messenger.files.FileCrypto
+import com.ts.messenger.files.FileService
+import com.ts.messenger.net.AppJson
 import com.ts.messenger.net.ChatMessage
+import com.ts.messenger.net.FileRef
+import com.ts.messenger.net.WireFile
+import com.ts.messenger.net.WireFileEnc
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import java.util.Base64
 import com.ts.messenger.net.ChatSocket
 import com.ts.messenger.net.DmChannel
 import com.ts.messenger.net.MessageDto
@@ -26,8 +35,9 @@ class ChatRepository(
     private val log: ChatLog,
     private val socket: ChatSocket,
     private val myId: String,
+    private val files: FileService,
 ) {
-    private class Pending(val channelId: String, val text: String)
+    private class Pending(val channelId: String, val text: String, val file: FileRef? = null)
 
     private val pending = ArrayDeque<Pending>()
     private val peers = ConcurrentHashMap<String, String>() // channel id -> peer user id
@@ -57,19 +67,41 @@ class ChatRepository(
         }
     }
 
+    /** Encrypts [p] with a fresh key, uploads the ciphertext and sends the key in an E2E message. */
+    suspend fun sendFile(dm: DmChannel, p: FileService.Picked) {
+        val channelId = dm.channel.id
+        val peerId = dm.otherUser.id
+        if (!socket.isReady) throw NotConnectedException()
+        val ref = files.upload(channelId, p)
+        val text = AppJson.encodeToString(
+            WireFile(ref.id, ref.name, ref.size, WireFileEnc(1, ref.key, FileCrypto.CHUNK, ref.mime)),
+        )
+        try {
+            crypto.exclusive {
+                if (!socket.isReady) throw NotConnectedException()
+                val payload = crypto.encrypt(peerId, text) { api.keyBundle(peerId) }
+                if (!socket.sendMessage(channelId, payload.ciphertext, payload.nonce, "file")) throw NotConnectedException()
+                synchronized(pending) { pending.addLast(Pending(channelId, ref.name, ref)) }
+            }
+        } catch (e: Throwable) {
+            files.discard(ref.id)
+            throw e
+        }
+    }
+
     /** The server accepted our oldest unconfirmed message in this conversation. */
     fun onSent(id: String, channelId: String, createdAt: String) {
         val p = synchronized(pending) {
             val i = pending.indexOfFirst { it.channelId == channelId }
             if (i < 0) null else pending.removeAt(i)
         } ?: return
-        log.upsert(channelId, listOf(ChatMessage(id, myId, p.text, createdAt)))
+        log.upsert(channelId, listOf(ChatMessage(id, myId, p.text, createdAt, file = p.file)))
         _changed.tryEmit(channelId)
     }
 
     suspend fun onIncoming(m: MessageDto) {
         val sender = m.senderId ?: return
-        if (sender == myId || m.messageType != "text") return // our own echo is logged by onSent
+        if (sender == myId || (m.messageType != "text" && m.messageType != "file")) return // our own echo is logged by onSent
         val peerId = peers[m.channelId] ?: run {
             // A conversation we have not seen yet (the other side started it).
             registerDms(api.listDms())
@@ -93,7 +125,7 @@ class ChatRepository(
         crypto.exclusive {
             for (m in dtos) {
                 val sender = m.senderId ?: continue
-                if (m.id in known || m.messageType != "text") continue
+                if (m.id in known || (m.messageType != "text" && m.messageType != "file")) continue
                 fresh += if (sender == myId) {
                     // Our own ciphertext cannot be decrypted by us; only the plaintext kept at
                     // send time on this device is readable.
@@ -119,12 +151,28 @@ class ChatRepository(
     private fun decryptOne(peerId: String, m: MessageDto): ChatMessage {
         val sender = m.senderId ?: peerId
         return try {
-            ChatMessage(m.id, sender, crypto.decrypt(peerId, m.ciphertext.toBytes()), m.createdAt)
+            val text = crypto.decrypt(peerId, m.ciphertext.toBytes())
+            if (m.messageType == "file") parseFile(m, sender, text) else ChatMessage(m.id, sender, text, m.createdAt)
         } catch (e: PeerIdentityChangedException) {
             _identityAlerts.tryEmit(e)
             ChatMessage(m.id, sender, "", m.createdAt, ok = false)
         } catch (_: Exception) {
             ChatMessage(m.id, sender, "", m.createdAt, ok = false)
         }
+    }
+
+    /** The peer controls this JSON: every field is validated before it is trusted. */
+    private fun parseFile(m: MessageDto, sender: String, text: String): ChatMessage {
+        val w = AppJson.decodeFromString<WireFile>(text)
+        val name = FileService.sanitizeName(w.filename)
+        val enc = w.enc
+        // No encryption info: a file from the web client, which uploads in plaintext. Not opened here.
+        if (enc == null) return ChatMessage(m.id, sender, name, m.createdAt, file = FileRef("", name, 0, "", ""))
+        require(FileService.ID.matches(w.fileId) && enc.v == 1 && enc.chunk == FileCrypto.CHUNK)
+        require(w.size in 0..FileService.MAX_FILE_BYTES)
+        require(Base64.getUrlDecoder().decode(enc.key).size == 32)
+        val mime = enc.mime.take(100).lowercase().takeIf { Regex("[a-z0-9.+-]+/[a-z0-9.+-]+").matches(it) }
+            ?: "application/octet-stream"
+        return ChatMessage(m.id, sender, name, m.createdAt, file = FileRef(w.fileId, name, w.size, mime, enc.key))
     }
 }

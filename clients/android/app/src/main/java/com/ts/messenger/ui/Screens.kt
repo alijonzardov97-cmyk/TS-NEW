@@ -167,6 +167,8 @@ fun AppContent(
     state: UiState,
     vm: com.ts.messenger.AppViewModel,
     onEnablePush: () -> Unit,
+    onPickFile: () -> Unit,
+    onSaveFile: (com.ts.messenger.net.FileRef) -> Unit,
 ) {
     when (val s = state.screen) {
         Screen.Connect -> ConnectScreen(state, vm::connect)
@@ -176,7 +178,7 @@ fun AppContent(
         is Screen.Recovery -> RecoveryScreen(s.code, vm::recoverySaved)
         Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice, onEnablePush, vm::disablePush)
         Screen.NewChat -> NewChatScreen(state, vm::search, vm::startChatWith, vm::leaveNewChat)
-        Screen.Chat -> ChatScreen(state, vm::closeChat, vm::sendMessage)
+        Screen.Chat -> ChatScreen(state, vm::closeChat, vm::sendMessage, onPickFile, onSaveFile, vm::loadImage)
     }
     state.identityAlert?.let { alert ->
         IdentityChangedDialog(alert, vm::acceptIdentity, vm::dismissIdentityAlert)

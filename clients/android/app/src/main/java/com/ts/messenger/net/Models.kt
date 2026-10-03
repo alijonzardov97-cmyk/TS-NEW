@@ -151,7 +151,39 @@ data class ChatMessage(
     @SerialName("created_at") val createdAt: String,
     /** False when the message could not be decrypted (text then holds a placeholder). */
     val ok: Boolean = true,
+    /** Set for attachments; [text] then holds the file name. */
+    val file: FileRef? = null,
 )
+
+/** Attachment as kept in the local log. [key] is empty for files we cannot decrypt (web client). */
+@Serializable
+data class FileRef(
+    val id: String,
+    val name: String,
+    val size: Long,
+    val mime: String,
+    val key: String,
+)
+
+/** Plaintext of a file message (inside the end-to-end encrypted payload). */
+@Serializable
+data class WireFile(
+    @SerialName("file_id") val fileId: String,
+    val filename: String,
+    val size: Long = 0,
+    val enc: WireFileEnc? = null,
+)
+
+@Serializable
+data class WireFileEnc(
+    val v: Int,
+    val key: String,
+    val chunk: Int,
+    val mime: String = "application/octet-stream",
+)
+
+@Serializable
+data class FileUploadResponse(val id: String)
 
 /** Wire format of an encrypted 1:1 message; identical to the web client's `WireMessage`. */
 @Serializable

@@ -90,4 +90,11 @@
     <string name="push_disable">Turn off</string>
     <string name="push_no_distributor">Install a UnifiedPush app (for example ntfy), then reopen TS.</string>
     <string name="push_server_unsupported">This server is not set up for notifications.</string>
+    <string name="attach">File</string>
+    <string name="uploading">Encrypting and sending the file…</string>
+    <string name="save_file">Save</string>
+    <string name="file_saved">File saved</string>
+    <string name="file_unsupported">Sent unencrypted from the web version, not opened for your safety.</string>
+    <string name="error_file_too_large">The file is too large (limit 25 MB).</string>
+    <string name="error_file_failed">Could not process the file.</string>
 </resources>

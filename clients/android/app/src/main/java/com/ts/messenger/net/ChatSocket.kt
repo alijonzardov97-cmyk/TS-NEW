@@ -90,7 +90,7 @@ class ChatSocket(
     }
 
     /** Returns false if the socket is not ready, in which case nothing was sent. */
-    fun sendMessage(channelId: String, ciphertext: List<Int>, nonce: List<Int>): Boolean {
+    fun sendMessage(channelId: String, ciphertext: List<Int>, nonce: List<Int>, messageType: String = "text"): Boolean {
         val ws = socket
         if (!ready || ws == null) return false
         return ws.send(buildJsonObject {
@@ -98,7 +98,7 @@ class ChatSocket(
             put("channel_id", channelId)
             put("ciphertext", JsonArray(ciphertext.map { JsonPrimitive(it) }))
             put("nonce", JsonArray(nonce.map { JsonPrimitive(it) }))
-            put("message_type", "text")
+            put("message_type", messageType)
         }.toString())
     }
 

@@ -90,4 +90,11 @@
     <string name="push_disable">Выключить</string>
     <string name="push_no_distributor">Установите приложение UnifiedPush (например, ntfy) и откройте TS заново.</string>
     <string name="push_server_unsupported">Этот сервер не настроен на уведомления.</string>
+    <string name="attach">Файл</string>
+    <string name="uploading">Шифрую и отправляю файл…</string>
+    <string name="save_file">Сохранить</string>
+    <string name="file_saved">Файл сохранён</string>
+    <string name="file_unsupported">Отправлен из веб-версии без шифрования — не открывается ради вашей безопасности.</string>
+    <string name="error_file_too_large">Файл слишком большой (лимит 25 МБ).</string>
+    <string name="error_file_failed">Не удалось обработать файл.</string>
 </resources>

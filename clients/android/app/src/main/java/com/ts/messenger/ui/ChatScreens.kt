@@ -1,5 +1,6 @@
 package com.ts.messenger.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,10 +28,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -40,6 +45,7 @@ import com.ts.messenger.R
 import com.ts.messenger.UiState
 import com.ts.messenger.crypto.PeerIdentityChangedException
 import com.ts.messenger.net.ChatMessage
+import com.ts.messenger.net.FileRef
 import com.ts.messenger.net.UserPublic
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -132,7 +138,14 @@ fun NewChatScreen(
 }
 
 @Composable
-fun ChatScreen(state: UiState, onBack: () -> Unit, onSend: (String) -> Unit) {
+fun ChatScreen(
+    state: UiState,
+    onBack: () -> Unit,
+    onSend: (String) -> Unit,
+    onPickFile: () -> Unit,
+    onSaveFile: (FileRef) -> Unit,
+    loadImage: suspend (FileRef) -> android.graphics.Bitmap?,
+) {
     val dm = state.current ?: return
     // Deliberately not rememberSaveable: an unsent draft must not end up in saved instance state.
     var draft by remember { mutableStateOf("") }
@@ -166,16 +179,28 @@ fun ChatScreen(state: UiState, onBack: () -> Unit, onSend: (String) -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     items(state.messages.asReversed(), key = { it.id }) { m ->
-                        Bubble(m, mine = m.senderId != dm.otherUser.id)
+                        Bubble(m, mine = m.senderId != dm.otherUser.id, onSaveFile, loadImage)
                     }
                 }
             }
             ErrorText(state.error)
+            if (state.uploading) {
+                Text(
+                    stringResource(R.string.uploading),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                TextButton(
+                    onClick = onPickFile,
+                    enabled = !state.uploading && state.connected,
+                    modifier = Modifier.heightIn(min = 52.dp),
+                ) { Text(stringResource(R.string.attach)) }
                 OutlinedTextField(
                     value = draft,
                     onValueChange = { if (it.length <= 3000) draft = it },
@@ -198,7 +223,12 @@ fun ChatScreen(state: UiState, onBack: () -> Unit, onSend: (String) -> Unit) {
 }
 
 @Composable
-private fun Bubble(m: ChatMessage, mine: Boolean) {
+private fun Bubble(
+    m: ChatMessage,
+    mine: Boolean,
+    onSaveFile: (FileRef) -> Unit,
+    loadImage: suspend (FileRef) -> android.graphics.Bitmap?,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
@@ -209,7 +239,10 @@ private fun Bubble(m: ChatMessage, mine: Boolean) {
             modifier = Modifier.widthIn(max = 300.dp),
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                if (m.ok) {
+                val file = m.file
+                if (m.ok && file != null) {
+                    FileBody(file, onSaveFile, loadImage)
+                } else if (m.ok) {
                     Text(m.text, style = MaterialTheme.typography.bodyLarge)
                 } else {
                     Text(
@@ -223,6 +256,43 @@ private fun Bubble(m: ChatMessage, mine: Boolean) {
             }
         }
     }
+}
+
+@Composable
+private fun FileBody(
+    file: FileRef,
+    onSaveFile: (FileRef) -> Unit,
+    loadImage: suspend (FileRef) -> android.graphics.Bitmap?,
+) {
+    Text(file.name, style = MaterialTheme.typography.bodyLarge)
+    if (file.key.isEmpty()) {
+        // A plaintext upload from the web client: deliberately not opened.
+        Text(
+            stringResource(R.string.file_unsupported),
+            style = MaterialTheme.typography.bodySmall,
+            fontStyle = FontStyle.Italic,
+        )
+        return
+    }
+    Text(formatSize(file.size), style = MaterialTheme.typography.labelSmall)
+    if (file.mime.startsWith("image/") && file.mime != "image/svg+xml") {
+        val bitmap by produceState<ImageBitmap?>(null, file.id) { value = loadImage(file)?.asImageBitmap() }
+        bitmap?.let {
+            Image(
+                bitmap = it,
+                contentDescription = file.name,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp).padding(top = 4.dp),
+            )
+        }
+    }
+    TextButton(onClick = { onSaveFile(file) }) { Text(stringResource(R.string.save_file)) }
+}
+
+private fun formatSize(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+    else -> String.format(java.util.Locale.US, "%.1f MB", bytes / 1048576.0)
 }
 
 private fun formatTime(iso: String): String = runCatching {

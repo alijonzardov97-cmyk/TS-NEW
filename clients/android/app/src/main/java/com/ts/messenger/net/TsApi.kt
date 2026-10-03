@@ -10,6 +10,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
@@ -168,6 +169,60 @@ class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
             bearer(url("/push/unsubscribe"), it)
                 .post(AppJson.encodeToString(PushUnsubscribeRequest(endpoint)).toRequestBody(JSON_MEDIA)).build()
         }) { }
+
+    /** Uploads an already encrypted blob; the server stores it as opaque bytes. */
+    suspend fun uploadEncrypted(channelId: String, blob: java.io.File): FileUploadResponse =
+        authed({
+            val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+                .addFormDataPart("encrypted", "1")
+                .addFormDataPart("channel_id", checkedId(channelId))
+                .addFormDataPart("name", "blob") // the real file name is only in the E2E message
+                .addFormDataPart("file", "blob", blob.asRequestBody("application/octet-stream".toMediaType()))
+                .build()
+            bearer(url("/files/upload"), it).post(body).build()
+        }) { AppJson.decodeFromString(it) }
+
+    /** Streams a stored blob to [dest]; fails if it grows beyond [maxBytes]. */
+    suspend fun downloadFile(fileId: String, dest: java.io.File, maxBytes: Long) {
+        val s = session ?: throw ApiException(401, "", "")
+        suspend fun once(token: String) = withContext(Dispatchers.IO) {
+            val response = try {
+                client.newCall(bearer(url("/files/${checkedId(fileId)}"), token).get().build()).execute()
+            } catch (e: SSLPeerUnverifiedException) {
+                throw CertificateChangedException()
+            } catch (e: IOException) {
+                throw NetworkException(e)
+            }
+            response.use { r ->
+                val body = r.body
+                if (!r.isSuccessful || body == null) throw ApiException(r.code, "", "")
+                try {
+                    var total = 0L
+                    dest.outputStream().buffered().use { out ->
+                        body.byteStream().use { input ->
+                            val buf = ByteArray(16 * 1024)
+                            while (true) {
+                                val n = input.read(buf)
+                                if (n < 0) break
+                                total += n
+                                if (total > maxBytes) throw ApiException(0, "too_large", "")
+                                out.write(buf, 0, n)
+                            }
+                        }
+                    }
+                } catch (e: IOException) {
+                    throw NetworkException(e)
+                }
+            }
+        }
+        val token = s.accessToken() ?: throw ApiException(401, "", "")
+        try {
+            once(token)
+        } catch (e: ApiException) {
+            if (e.status != 401) throw e
+            once(s.forceRefresh() ?: throw e)
+        }
+    }
 
     private fun post(path: String, json: String) =
         Request.Builder().url(url(path)).post(json.toRequestBody(JSON_MEDIA)).build()

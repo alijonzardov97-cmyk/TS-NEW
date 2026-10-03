@@ -29,6 +29,24 @@ class MainActivity : FragmentActivity() {
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { vm.enablePush() }
 
+    // Pickers live in the activity: the app locks itself while the system picker is in front, and
+    // a result must still arrive after the unlock.
+    private val pickFile =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) vm.sendFile(uri) }
+
+    private var fileToSave: com.ts.messenger.net.FileRef? = null
+    private val saveFile =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+            val ref = fileToSave
+            fileToSave = null
+            if (uri != null && ref != null) vm.saveFile(ref, uri)
+        }
+
+    private fun saveFile(ref: com.ts.messenger.net.FileRef) {
+        fileToSave = ref
+        saveFile.launch(ref.name)
+    }
+
     private fun enablePush() {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -51,7 +69,7 @@ class MainActivity : FragmentActivity() {
                 val state by vm.state.collectAsState()
                 val lockAvailable = remember { AppLock.isAvailable(this) }
                 if (state.unlocked) {
-                    AppContent(state, vm, ::enablePush)
+                    AppContent(state, vm, ::enablePush, { pickFile.launch("*/*") }, ::saveFile)
                 } else {
                     LockScreen(noLockSet = !lockAvailable, failed = unlockFailed, onUnlock = ::promptUnlock)
                 }

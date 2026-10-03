@@ -49,6 +49,8 @@ async fn upload_file(
     let mut encrypted_name = String::from("unnamed");
     let mut content_type: Option<String> = None;
     let mut channel_id: Option<Uuid> = None;
+    // Client-side encrypted blob: the server cannot (and must not) inspect it.
+    let mut encrypted_blob = false;
 
     while let Some(field) = multipart
         .next_field()
@@ -79,6 +81,13 @@ async fn upload_file(
                 if encrypted_name.len() > 512 {
                     return Err(AppError::Validation("file name too long (max 512 bytes)".to_string()));
                 }
+            }
+            "encrypted" => {
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::Validation(format!("read encrypted: {e}")))?;
+                encrypted_blob = text == "1";
             }
             "channel_id" => {
                 let text = field
@@ -140,13 +149,19 @@ async fn upload_file(
         ));
     }
 
-    // Security: validate file type via magic bytes and use detected type
-    let detected_type = match file_security::validate_file_type(&data) {
-        Ok(detected) => Some(detected.to_string()),
-        Err(reason) => {
-            return Err(AppError::Validation(format!(
-                "file type not allowed: {reason}"
-            )));
+    // Security: validate file type via magic bytes and use detected type.
+    // Client-side encrypted blobs are opaque by design: stored as octet-stream,
+    // never rendered by the server (no EXIF/SVG/thumbnail processing applies).
+    let detected_type = if encrypted_blob {
+        Some("application/octet-stream".to_string())
+    } else {
+        match file_security::validate_file_type(&data) {
+            Ok(detected) => Some(detected.to_string()),
+            Err(reason) => {
+                return Err(AppError::Validation(format!(
+                    "file type not allowed: {reason}"
+                )));
+            }
         }
     };
 
