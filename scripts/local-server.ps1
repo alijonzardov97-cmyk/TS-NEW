@@ -31,7 +31,9 @@ if ($LASTEXITCODE -ne 0) { throw "Docker is not running. Start Docker Desktop fi
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 function New-Hex([int]$bytes) {
     $b = New-Object byte[] $bytes
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($b)
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $rng.GetBytes($b)
+    $rng.Dispose()
     -join ($b | ForEach-Object { $_.ToString("x2") })
 }
 
