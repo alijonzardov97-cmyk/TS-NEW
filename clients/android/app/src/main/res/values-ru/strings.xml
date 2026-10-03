@@ -47,7 +47,7 @@
     <string name="sign_out">Выйти</string>
 
     <string name="error_generic">Что-то пошло не так. Попробуйте ещё раз.</string>
-    <string name="error_network">Нет связи с сервером. Проверьте интернет и попробуйте снова.</string>
+    <string name="error_network">Нет связи с сервером. Проверьте интернет (и Tailscale, если сервер в нём) и попробуйте снова.</string>
     <string name="error_https_only">Разрешены только защищённые адреса https://.</string>
     <string name="error_bad_credentials">Неверное имя пользователя или пароль.</string>
     <string name="error_too_many">Слишком много попыток. Подождите несколько минут и попробуйте снова.</string>
@@ -57,4 +57,10 @@
     <string name="error_username_taken">Это имя уже занято.</string>
     <string name="error_invite">Код приглашения недействителен или срок его действия истёк.</string>
     <string name="error_not_ts_server">Этот адрес не похож на сервер TS.</string>
+    <string name="cert_changed_title">Сертификат сервера изменился</string>
+    <string name="cert_changed_body">Сервер предъявил новый сертификат. Это нормально после автоматического продления (например, Let\'s Encrypt), но так же может выглядеть и перехват соединения. Доверяйте, только если администратор подтвердил новый отпечаток.</string>
+    <string name="cert_changed_old">Сохранённый отпечаток</string>
+    <string name="cert_changed_new">Новый отпечаток</string>
+    <string name="cert_changed_accept">Доверять новому сертификату</string>
+    <string name="cert_changed_reject">Не доверять</string>
 </resources>

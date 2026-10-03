@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -173,4 +175,31 @@ fun AppContent(
         is Screen.Recovery -> RecoveryScreen(s.code, vm::recoverySaved)
         Screen.Home -> HomeScreen(state, vm::signOut)
     }
+    state.certChange?.let { change ->
+        CertChangedDialog(change, vm::acceptCertChange, vm::rejectCertChange)
+    }
+}
+
+@Composable
+fun CertChangedDialog(change: com.ts.messenger.CertChange, onAccept: () -> Unit, onReject: () -> Unit) {
+    fun group(fp: String) = fp.chunked(8).joinToString(" ")
+    AlertDialog(
+        onDismissRequest = onReject,
+        title = { Text(stringResource(R.string.cert_changed_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.cert_changed_body))
+                Text(stringResource(R.string.cert_changed_old), style = MaterialTheme.typography.labelMedium)
+                SelectionContainer {
+                    Text(group(change.oldFingerprint), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                }
+                Text(stringResource(R.string.cert_changed_new), style = MaterialTheme.typography.labelMedium)
+                SelectionContainer {
+                    Text(group(change.probe.leafFingerprint), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onAccept) { Text(stringResource(R.string.cert_changed_accept)) } },
+        dismissButton = { TextButton(onClick = onReject) { Text(stringResource(R.string.cert_changed_reject)) } },
+    )
 }

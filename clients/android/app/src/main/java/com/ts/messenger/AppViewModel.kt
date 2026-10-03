@@ -38,6 +38,9 @@ sealed interface Screen {
     data object Home : Screen
 }
 
+/** A server whose certificate no longer matches the saved pin; waits for the user's decision. */
+data class CertChange(val oldFingerprint: String, val probe: ServerProbe)
+
 data class UiState(
     val unlocked: Boolean = false,
     val screen: Screen = Screen.Connect,
@@ -46,6 +49,7 @@ data class UiState(
     val serverHost: String? = null,
     val config: ServerConfig? = null,
     val user: UserPublic? = null,
+    val certChange: CertChange? = null,
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -221,11 +225,45 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.putString(K_USER, AppJson.encodeToString(user))
     }
 
+    /**
+     * The pinned certificate no longer matches. Let's Encrypt (used by Tailscale and Caddy) renews
+     * certificates regularly, so this is expected from time to time. We fetch the new chain with a
+     * normally validated handshake (system trust store only) and ask the user to confirm it.
+     * Nothing is re-pinned without an explicit tap, and the old session is kept.
+     */
+    private suspend fun presentCertChange() {
+        val url = baseUrl
+        val old = pins.firstOrNull()?.removePrefix("sha256/")
+        if (url == null || old == null) {
+            _state.update { it.copy(error = R.string.error_cert_changed) }
+            return
+        }
+        try {
+            val probe = TsApi.probe(url)
+            _state.update { it.copy(certChange = CertChange(old, probe)) }
+        } catch (e: Exception) {
+            // The new certificate does not even validate: treat as a possible attack.
+            _state.update { it.copy(error = R.string.error_cert_changed) }
+        }
+    }
+
+    fun acceptCertChange() {
+        val change = _state.value.certChange ?: return
+        val url = change.probe.baseUrl.toHttpUrlOrNull() ?: return
+        store.putString(K_SERVER_PINS, AppJson.encodeToString(change.probe.pins))
+        useServer(url, change.probe.pins)
+        _state.update { it.copy(certChange = null, error = null) }
+    }
+
+    fun rejectCertChange() = _state.update { it.copy(certChange = null) }
+
     private fun launchBusy(block: suspend () -> Unit) {
         _state.update { it.copy(busy = true, error = null) }
         viewModelScope.launch {
             try {
                 block()
+            } catch (e: CertificateChangedException) {
+                presentCertChange()
             } catch (e: Exception) {
                 _state.update { it.copy(error = errorRes(e)) }
             } finally {

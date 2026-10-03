@@ -47,7 +47,7 @@
     <string name="sign_out">Sign out</string>
 
     <string name="error_generic">Something went wrong. Please try again.</string>
-    <string name="error_network">No connection to the server. Check your internet and try again.</string>
+    <string name="error_network">No connection to the server. Check your internet (and Tailscale, if the server is on it) and try again.</string>
     <string name="error_https_only">Only secure https:// addresses are allowed.</string>
     <string name="error_bad_credentials">Incorrect username or password.</string>
     <string name="error_too_many">Too many attempts. Please wait a few minutes and try again.</string>
@@ -57,4 +57,10 @@
     <string name="error_username_taken">This username is already taken.</string>
     <string name="error_invite">This invite code is not valid or has expired.</string>
     <string name="error_not_ts_server">This address does not look like a TS server.</string>
+    <string name="cert_changed_title">Server certificate changed</string>
+    <string name="cert_changed_body">The server presented a new certificate. This is normal after an automatic renewal (for example Let\'s Encrypt), but it can also mean someone is intercepting the connection. Trust it only if your administrator confirms the new fingerprint.</string>
+    <string name="cert_changed_old">Saved fingerprint</string>
+    <string name="cert_changed_new">New fingerprint</string>
+    <string name="cert_changed_accept">Trust the new certificate</string>
+    <string name="cert_changed_reject">Do not trust</string>
 </resources>
