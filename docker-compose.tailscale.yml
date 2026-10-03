@@ -1,0 +1,12 @@
+# Overlay for running TS reachable ONLY through Tailscale.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d --build
+#
+# The app port is bound to loopback, so nothing is reachable from the LAN or the internet.
+# `tailscale serve` (see docs/self-hosting/tailscale.md) then publishes it inside your tailnet
+# over HTTPS with a real Let's Encrypt certificate. Never use `tailscale funnel` for TS.
+# Requires Docker Compose v2.24+ (for `!override`).
+services:
+  ts:
+    ports: !override
+      - "127.0.0.1:8080:8080"
