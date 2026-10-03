@@ -53,6 +53,13 @@ if (-not (Test-Path secrets\totp_encryption_key)) {
     [IO.File]::WriteAllText((Join-Path (Get-Location) "secrets\totp_encryption_key"), (New-Hex 32), $utf8)
 }
 
+# The server runs as an unprivileged user inside its container. openssl creates the private key
+# with mode 600 (root only), which the server then cannot read ("Permission denied"). Make the
+# files readable for the container; they live in this folder on a single-user PC.
+$secretsDir = (Resolve-Path secrets).Path
+docker run --rm -v "${secretsDir}:/s" --entrypoint sh alpine/openssl -c "chmod 755 /s && chmod 644 /s/*"
+if ($LASTEXITCODE -ne 0) { throw "Could not set permissions on the secrets folder." }
+
 if (-not (Test-Path .env)) {
     $db = [IO.File]::ReadAllText((Join-Path (Get-Location) "secrets\db_password")).Trim()
     $totp = [IO.File]::ReadAllText((Join-Path (Get-Location) "secrets\totp_encryption_key")).Trim()
