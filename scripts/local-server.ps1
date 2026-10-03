@@ -76,6 +76,8 @@ MAX_FILE_SIZE_MB=100
 LISTEN_ADDR=0.0.0.0:8080
 PUBLIC_URL=$PublicUrl
 ICE_SERVERS=[]
+# Small private instance: everyone can find everyone by name.
+SEARCH_ALL_USERS=true
 # TESTING ONLY: anyone who can reach the server may register. Change to invite_only afterwards.
 REGISTRATION_MODE=open
 ADMIN_USERNAME=$Admin

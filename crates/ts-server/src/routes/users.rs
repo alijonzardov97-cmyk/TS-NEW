@@ -70,8 +70,9 @@ async fn search_users(
         ));
     }
 
-    // Instance owner can search all users; everyone else only sees community peers
-    let users = if claims.is_owner {
+    // Instance owner (or every user, when SEARCH_ALL_USERS=true on a small private instance)
+    // can search all users; everyone else only sees community peers
+    let users = if claims.is_owner || state.config.search_all_users {
         user_repo::search_users(&state.db, &query.q, 20).await?
     } else {
         community_repo::search_visible_users(&state.db, claims.sub, &query.q, 20).await?

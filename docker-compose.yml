@@ -31,6 +31,7 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       PUSH_ALLOWED_HOSTS: ${PUSH_ALLOWED_HOSTS:-}
+      SEARCH_ALL_USERS: ${SEARCH_ALL_USERS:-false}
       # OIDC/SSO — uncomment and configure to enable single sign-on
       # OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}         # OIDC provider discovery URL
       # OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}            # Client ID from your IdP
