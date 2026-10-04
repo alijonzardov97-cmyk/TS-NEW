@@ -69,7 +69,8 @@ class MessageStore {
 		const historyIds = new Set(messages.map(m => m.id));
 		const realtimeOnly = existing.filter(m => !historyIds.has(m.id));
 		const next = new Map(this.messagesByChannel);
-		next.set(channelId, [...messages, ...realtimeOnly]);
+		const merged = [...messages, ...realtimeOnly];
+		next.set(channelId, merged.filter((m, i) => merged.findIndex(x => x.id === m.id) === i));
 		this.messagesByChannel = next;
 	}
 

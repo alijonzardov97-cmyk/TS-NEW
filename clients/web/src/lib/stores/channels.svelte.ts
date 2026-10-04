@@ -12,7 +12,7 @@ class ChannelStore {
 	}
 
 	setChannels(channels: Channel[]) {
-		this.channels = channels;
+		this.channels = channels.filter((c, i) => channels.findIndex(x => x.id === c.id) === i);
 	}
 
 	addChannel(channel: Channel) {

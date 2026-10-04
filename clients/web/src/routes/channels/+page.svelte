@@ -132,7 +132,8 @@
 
 			communityStore.setCommunities(communities);
 			channelStore.setChannels(channels);
-			dmChannels = dms;
+			// A repeated entry would crash the keyed list, so keep one per channel.
+			dmChannels = dms.filter((d, i) => dms.findIndex(x => x.channel.id === d.channel.id) === i);
 
 			// Auto-select first community if none saved
 			if (!communityStore.activeCommunityId && communities.length > 0) {

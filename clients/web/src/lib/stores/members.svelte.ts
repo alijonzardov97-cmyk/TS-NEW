@@ -9,7 +9,7 @@ class MemberStore {
 
 	setMembers(channelId: string, members: ChannelMember[]) {
 		const next = new Map(this.membersByChannel);
-		next.set(channelId, members);
+		next.set(channelId, members.filter((m, i) => members.findIndex(x => x.user_id === m.user_id) === i));
 		this.membersByChannel = next;
 	}
 
