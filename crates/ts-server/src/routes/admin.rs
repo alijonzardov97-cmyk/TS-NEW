@@ -326,6 +326,9 @@ async fn delete_user(
     )
     .await?;
 
+    // Cut off the user's live connections and any access token they still hold.
+    state.suspended_users.insert(user_id);
+
     // Transfer community/group ownership to the instance owner before deletion.
     // This prevents orphaned communities/groups with NULL owner_id.
     let instance_owner_id = sqlx::query_scalar::<_, Uuid>(

@@ -99,8 +99,24 @@ pub async fn handle_socket(
     let mut tokens: f64 = RATE_LIMIT_BURST;
     let mut last_refill = tokio::time::Instant::now();
 
-    // Reader task: processes incoming WebSocket messages
-    while let Some(Ok(msg)) = ws_stream.next().await {
+    // Reader task: processes incoming WebSocket messages.
+    // Every few seconds it also checks whether the account was suspended or deleted, and if so
+    // drops the connection (the token was only checked once, at login).
+    let mut suspension_check = tokio::time::interval(tokio::time::Duration::from_secs(5));
+    loop {
+        let msg = tokio::select! {
+            next = ws_stream.next() => match next {
+                Some(Ok(m)) => m,
+                _ => break,
+            },
+            _ = suspension_check.tick() => {
+                if state.suspended_users.contains(&user_id) {
+                    tracing::info!(%user_id, "closing WebSocket: account suspended");
+                    break;
+                }
+                continue;
+            }
+        };
         match msg {
             Message::Text(text) => {
                 // Reject oversized messages
