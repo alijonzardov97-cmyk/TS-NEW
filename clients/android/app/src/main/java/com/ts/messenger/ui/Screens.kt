@@ -118,7 +118,6 @@ fun RegisterScreen(
     onBack: () -> Unit,
 ) {
     var username by rememberSaveable { mutableStateOf("") }
-    var email by rememberSaveable { mutableStateOf("") }
     var displayName by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var confirm by rememberSaveable { mutableStateOf("") }
@@ -127,7 +126,6 @@ fun RegisterScreen(
     Page(stringResource(R.string.register_title)) {
         if (needsInvite) PlainField(invite, { invite = it }, stringResource(R.string.invite_code))
         PlainField(username, { username = it }, stringResource(R.string.username))
-        PlainField(email, { email = it }, stringResource(R.string.email), keyboardType = KeyboardType.Email)
         PlainField(displayName, { displayName = it }, stringResource(R.string.display_name))
         SecretField(password, { password = it }, stringResource(R.string.password))
         SecretField(confirm, { confirm = it }, stringResource(R.string.confirm_password), imeAction = ImeAction.Done)
@@ -136,10 +134,10 @@ fun RegisterScreen(
         PrimaryButton(
             stringResource(if (state.busy) R.string.registering else R.string.create_account),
             busy = state.busy,
-            enabled = username.isNotBlank() && email.isNotBlank() && password.isNotEmpty() &&
+            enabled = username.isNotBlank() && password.isNotEmpty() &&
                 (!needsInvite || invite.isNotBlank()),
         ) {
-            onRegister(username, email, displayName, password, confirm, invite)
+            onRegister(username, "", displayName, password, confirm, invite)
             password = ""
             confirm = ""
         }

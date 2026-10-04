@@ -326,7 +326,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val res = client.register(
                     RegisterRequest(
                         username = username.trim(),
-                        email = email.trim(),
+                        // The server still requires an email; the app no longer asks for one, so use a private placeholder.
+                        email = email.trim().ifEmpty { "${username.trim().lowercase()}@ts.invalid" },
                         password = password,
                         displayName = displayName.trim().ifEmpty { username.trim() },
                         identityKey = keys.identityKey,
