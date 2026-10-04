@@ -55,7 +55,8 @@ export interface CommunityBan {
 // ── Community CRUD ──
 
 export async function listCommunities(): Promise<Community[]> {
-	return api.get<Community[]>('/communities');
+	// Communities are switched off on this server (direct chats only): always an empty list.
+	return [];
 }
 
 export async function getCommunity(id: string): Promise<Community> {
