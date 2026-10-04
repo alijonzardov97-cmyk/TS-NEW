@@ -87,6 +87,8 @@ data class UiState(
     val background: Boolean = true,
     /** True while the signed-in user is moving the app to another server address. */
     val movingServer: Boolean = false,
+    /** Channels whose newest incoming message has not been seen yet (shown as a dot). */
+    val unread: Set<String> = emptySet(),
     /** Channel id -> time of its newest message; the list shows the most recent chat on top. */
     val lastActivity: Map<String, String> = emptyMap(),
     val uploading: Boolean = false,
@@ -419,7 +421,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     msgs.lastOrNull()?.let { last -> _state.update { it.copy(lastActivity = it.lastActivity + (ch to last.createdAt)) } }
                     if (_state.value.current?.channel?.id == ch) {
                         _state.update { it.copy(messages = msgs) }
-                    }
+                        markSeen(ch)
+                    } else recomputeUnread()
                 }
             }
             launch {
@@ -517,6 +520,46 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** channel id -> time of the newest incoming message the user has seen. */
+    private var seen: MutableMap<String, String>? = null
+    private val seenSerializer = kotlinx.serialization.builtins.MapSerializer(
+        kotlinx.serialization.serializer<String>(), kotlinx.serialization.serializer<String>(),
+    )
+
+    private fun newestIncoming(ch: String): String? {
+        val me = _state.value.user?.id
+        return repo?.cached(ch)?.lastOrNull { it.senderId != me }?.createdAt
+    }
+
+    private fun seenMap(): MutableMap<String, String> = seen ?: run {
+        val raw = store.getString(K_SEEN)
+        val m = raw?.let { runCatching { AppJson.decodeFromString(seenSerializer, it) }.getOrNull() }?.toMutableMap()
+            // First start with this feature: everything already on the device counts as seen.
+            ?: _state.value.dms.mapNotNull { d -> newestIncoming(d.channel.id)?.let { d.channel.id to it } }.toMap().toMutableMap()
+        seen = m
+        if (raw == null) store.putString(K_SEEN, AppJson.encodeToString(seenSerializer, m))
+        m
+    }
+
+    private fun markSeen(ch: String) {
+        val t = newestIncoming(ch) ?: return
+        val m = seenMap()
+        if (m[ch] != t) {
+            m[ch] = t
+            store.putString(K_SEEN, AppJson.encodeToString(seenSerializer, m))
+        }
+        recomputeUnread()
+    }
+
+    private fun recomputeUnread() {
+        val m = seenMap()
+        val open = _state.value.current?.channel?.id
+        val u = _state.value.dms.map { it.channel.id }.filter { ch ->
+            ch != open && newestIncoming(ch)?.let { it > (m[ch] ?: "") } == true
+        }.toSet()
+        _state.update { it.copy(unread = u) }
+    }
+
     fun refreshDms() {
         val a = api ?: return
         viewModelScope.launch {
@@ -527,6 +570,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 socket?.let { s -> dms.forEach { s.subscribe(it.channel.id) } }
                 val activity = dms.mapNotNull { d -> repo?.cached(d.channel.id)?.lastOrNull()?.let { d.channel.id to it.createdAt } }.toMap()
                 _state.update { it.copy(dms = dms, lastActivity = it.lastActivity + activity) }
+                seenMap()
+                recomputeUnread()
+                // Pick up what arrived while the app was closed, so order and dots are right.
+                val open = _state.value.current?.channel?.id
+                dms.filter { it.channel.id != open }.forEach { d ->
+                    runCatching { repo?.loadHistory(d) }
+                }
+                recomputeUnread()
                 pendingCallChannel?.let { ch -> pendingCallChannel = null; calls?.ringFromPush(ch) }
                 pendingChatChannel?.let { ch ->
                     pendingChatChannel = null
@@ -546,6 +597,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 r.loadHistory(dm)
+                markSeen(dm.channel.id)
             } catch (e: CertificateChangedException) {
                 presentCertChange()
             } catch (e: Exception) {
@@ -555,7 +607,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeChat() {
+        _state.value.current?.channel?.id?.let { markSeen(it) }
         _state.update { it.copy(screen = Screen.Home, current = null, messages = emptyList(), error = null) }
+        recomputeUnread()
         refreshDms()
     }
 
@@ -834,6 +888,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val K_REFRESH = "auth.refresh"
         const val K_USER = "auth.user"
         const val K_BG = "bg.enabled"
+        const val K_SEEN = "chat.seen"
         const val MAX_TEXT_CHARS = 3000
     }
 }

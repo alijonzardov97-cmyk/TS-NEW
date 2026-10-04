@@ -189,7 +189,7 @@ fun ConversationListScreen(
                 } else {
                     LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 88.dp)) {
                         items(state.dms.sortedByDescending { state.lastActivity[it.channel.id].orEmpty() }, key = { it.otherUser.id }) { dm ->
-                            PersonRow(dm.otherUser) { onOpen(dm) }
+                            PersonRow(dm.otherUser, unread = dm.channel.id in state.unread) { onOpen(dm) }
                         }
                     }
                 }
@@ -212,7 +212,7 @@ fun ConversationListScreen(
 
 /** One contact line: avatar, name, @username, hairline separator inset past the avatar. */
 @Composable
-private fun PersonRow(user: UserPublic, enabled: Boolean = true, onClick: () -> Unit) {
+private fun PersonRow(user: UserPublic, enabled: Boolean = true, unread: Boolean = false, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Column(modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick)) {
         Row(
@@ -230,6 +230,10 @@ private fun PersonRow(user: UserPublic, enabled: Boolean = true, onClick: () -> 
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text("@${user.username}", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (unread) {
+                Spacer(Modifier.width(12.dp))
+                Box(modifier = Modifier.size(12.dp).background(colors.primary, androidx.compose.foundation.shape.CircleShape))
             }
         }
         HorizontalDivider(modifier = Modifier.padding(start = 82.dp), color = colors.outlineVariant)
