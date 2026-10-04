@@ -104,6 +104,9 @@
     <string name="call_incoming">Incoming call</string>
     <string name="call_calling">Calling…</string>
     <string name="call_connecting">Connecting…</string>
+    <string name="call_sub_calling">Waiting for an answer…</string>
+    <string name="call_sub_connecting">Setting up the secure connection…</string>
+    <string name="call_sub_active">End-to-end encryption is on</string>
     <string name="call_active">Call in progress</string>
     <string name="call_accept">Answer</string>
     <string name="call_decline">Decline</string>

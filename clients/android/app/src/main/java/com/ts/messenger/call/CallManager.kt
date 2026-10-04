@@ -65,6 +65,8 @@ data class CallUi(
     val remoteTrack: VideoTrack? = null,
     val remoteLive: Boolean = false,
     val localTrack: VideoTrack? = null,
+    /** Seconds since the call became active. */
+    val seconds: Int = 0,
 )
 
 /** Shared EGL context for video rendering and hardware codecs. */
@@ -112,6 +114,7 @@ class CallManager(
     private var remoteTrack: VideoTrack? = null
     private var probeJob: Job? = null
     @Volatile private var lastRemoteFrame = 0L
+    private var activeSince = 0L
     private val remoteProbe = VideoSink { lastRemoteFrame = android.os.SystemClock.elapsedRealtime() }
     private val pendingIce = ArrayList<IceCandidate>()
     private var timeout: Job? = null
@@ -304,7 +307,9 @@ class CallManager(
                 while (true) {
                     delay(1_000)
                     val live = lastRemoteFrame != 0L && android.os.SystemClock.elapsedRealtime() - lastRemoteFrame < 2_500
-                    if (live != _ui.value.remoteLive) _ui.value = _ui.value.copy(remoteLive = live)
+                    val sec = if (phase == CallPhase.Active && activeSince != 0L)
+                        ((android.os.SystemClock.elapsedRealtime() - activeSince) / 1000).toInt() else 0
+                    if (live != _ui.value.remoteLive || sec != _ui.value.seconds) _ui.value = _ui.value.copy(remoteLive = live, seconds = sec)
                 }
             }
             savedMode = audio.mode
@@ -464,6 +469,7 @@ class CallManager(
     // ── Helpers ──
 
     private fun setPhase(p: CallPhase) {
+        if (p == CallPhase.Active && activeSince == 0L) activeSince = android.os.SystemClock.elapsedRealtime()
         _ui.value = _ui.value.copy(phase = p)
         if (p == CallPhase.Connecting) startTimeout(30_000, R.string.call_failed)
     }
@@ -536,6 +542,7 @@ class CallManager(
         if (leave && ch.isNotEmpty()) sendVoice("leave_voice", ch)
         probeJob?.cancel()
         probeJob = null
+        activeSince = 0L
         stopCamera(false)
         runCatching { remoteTrack?.removeSink(remoteProbe) }
         remoteTrack = null

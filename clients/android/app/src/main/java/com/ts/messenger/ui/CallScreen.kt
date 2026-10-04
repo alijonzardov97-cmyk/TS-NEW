@@ -83,16 +83,26 @@ fun CallScreen(
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    stringResource(
-                        when (call.phase) {
-                            CallPhase.Ringing -> R.string.call_incoming
-                            CallPhase.Calling -> R.string.call_calling
-                            CallPhase.Connecting -> R.string.call_connecting
-                            else -> R.string.call_active
-                        },
-                    ),
+                    when (call.phase) {
+                        CallPhase.Ringing -> stringResource(R.string.call_incoming)
+                        CallPhase.Calling -> stringResource(R.string.call_calling)
+                        CallPhase.Connecting -> stringResource(R.string.call_connecting)
+                        else -> "%02d:%02d".format(call.seconds / 60, call.seconds % 60)
+                    },
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White.copy(alpha = 0.7f),
+                )
+                val sub = when (call.phase) {
+                    CallPhase.Calling -> R.string.call_sub_calling
+                    CallPhase.Connecting -> R.string.call_sub_connecting
+                    CallPhase.Active -> R.string.call_sub_active
+                    else -> null
+                }
+                if (sub != null) Text(
+                    stringResource(sub),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.55f),
+                    textAlign = TextAlign.Center,
                 )
             }
 

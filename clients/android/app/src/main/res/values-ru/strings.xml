@@ -104,6 +104,9 @@
     <string name="call_incoming">Входящий звонок</string>
     <string name="call_calling">Вызов…</string>
     <string name="call_connecting">Соединение…</string>
+    <string name="call_sub_calling">Ожидаем ответа…</string>
+    <string name="call_sub_connecting">Устанавливаем защищённое соединение…</string>
+    <string name="call_sub_active">Сквозное шифрование включено</string>
     <string name="call_active">Идёт разговор</string>
     <string name="call_accept">Ответить</string>
     <string name="call_decline">Отклонить</string>
