@@ -145,26 +145,49 @@ pub fn hash_password_public(password: &str) -> Result<String, AppError> {
     hash_password(password)
 }
 
+/// At most this many Argon2 computations run at once (each needs 64 MiB and a lot of CPU).
+static HASH_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+/// Run a heavy password computation without freezing the async executor and without letting an
+/// unlimited number of them run together: the worker thread is handed over to the blocking pool
+/// and the computation waits for one of the few slots.
+fn with_hash_slot<T>(f: impl FnOnce() -> T) -> T {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(|| {
+                let _permit = handle.block_on(HASH_SLOTS.acquire());
+                f()
+            })
+        }
+        _ => f(),
+    }
+}
+
 /// Hash a password with Argon2id.
 pub(crate) fn hash_password(password: &str) -> Result<String, AppError> {
-    let salt = SaltString::generate(&mut OsRng);
-    let params = Params::new(65536, 3, 4, Some(32))
-        .map_err(|e| AppError::Internal(format!("argon2 params: {e}")))?;
-    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    with_hash_slot(|| {
+        let salt = SaltString::generate(&mut OsRng);
+        let params = Params::new(65536, 3, 4, Some(32))
+            .map_err(|e| AppError::Internal(format!("argon2 params: {e}")))?;
+        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
-    argon2
-        .hash_password(password.as_bytes(), &salt)
-        .map(|h| h.to_string())
-        .map_err(|e| AppError::Internal(format!("password hash failed: {e}")))
+        argon2
+            .hash_password(password.as_bytes(), &salt)
+            .map(|h| h.to_string())
+            .map_err(|e| AppError::Internal(format!("password hash failed: {e}")))
+    })
 }
 
 /// Verify a password against an Argon2id hash.
 pub(crate) fn verify_password(password: &str, hash: &str) -> Result<bool, AppError> {
     let parsed = PasswordHash::new(hash)
         .map_err(|e| AppError::Internal(format!("invalid password hash: {e}")))?;
-    Ok(Argon2::default()
-        .verify_password(password.as_bytes(), &parsed)
-        .is_ok())
+    Ok(with_hash_slot(|| {
+        Argon2::default()
+            .verify_password(password.as_bytes(), &parsed)
+            .is_ok()
+    }))
 }
 
 /// Generate a cryptographically random refresh token (32 bytes) and return (raw, sha256_hash).

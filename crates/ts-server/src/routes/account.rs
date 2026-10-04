@@ -111,12 +111,21 @@ async fn change_password(
         AppError::Validation("password change is not available for SSO accounts".to_string())
     })?;
 
-    // Verify current password
+    // Verify current password (wrong guesses are throttled: a stolen access token must not be
+    // usable as a password-guessing oracle)
+    let pw_key = format!("pw:{}", claims.sub);
+    if let Some(remaining) = auth_service::check_lockout_by_key(&pw_key) {
+        return Err(AppError::Validation(format!(
+            "too many attempts — try again in {remaining} seconds"
+        )));
+    }
     if !auth_service::verify_password(&req.current_password, password_hash)? {
+        auth_service::record_failed_attempt(&pw_key);
         return Err(AppError::Validation(
             "current password is incorrect".to_string(),
         ));
     }
+    auth_service::clear_lockout_by_key(&pw_key);
 
     // Validate new password complexity
     auth_service::validate_password(&req.new_password)?;
@@ -143,15 +152,39 @@ async fn change_password(
     Ok(())
 }
 
+/// Body of the regenerate-recovery-code request: the account password is required, so that a
+/// stolen access token alone cannot mint a recovery code and take the account over.
+#[derive(serde::Deserialize)]
+struct RegenerateRecoveryCodeRequest {
+    password: String,
+}
+
 /// Regenerate the recovery code for the authenticated user.
 async fn regenerate_recovery_code(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<AccessClaims>,
+    Json(req): Json<RegenerateRecoveryCodeRequest>,
 ) -> Result<Json<RegenerateRecoveryCodeResponse>, AppError> {
     // Verify user exists
-    let _user = user_repo::find_by_id(&state.db, claims.sub)
+    let user = user_repo::find_by_id(&state.db, claims.sub)
         .await?
         .ok_or(AppError::Unauthorized)?;
+
+    // Re-authenticate with the password (throttled like a password change)
+    let password_hash = user.password_hash.as_deref().ok_or_else(|| {
+        AppError::Validation("recovery code change is not available for SSO accounts".to_string())
+    })?;
+    let pw_key = format!("pw:{}", claims.sub);
+    if let Some(remaining) = auth_service::check_lockout_by_key(&pw_key) {
+        return Err(AppError::Validation(format!(
+            "too many attempts — try again in {remaining} seconds"
+        )));
+    }
+    if !auth_service::verify_password(&req.password, password_hash)? {
+        auth_service::record_failed_attempt(&pw_key);
+        return Err(AppError::Validation("password is incorrect".to_string()));
+    }
+    auth_service::clear_lockout_by_key(&pw_key);
 
     // Generate new recovery code
     let (new_code, new_hash) = auth_service::generate_recovery_code();
