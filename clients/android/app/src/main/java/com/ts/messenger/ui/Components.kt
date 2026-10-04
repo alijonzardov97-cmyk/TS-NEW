@@ -1,6 +1,7 @@
 package com.ts.messenger.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
