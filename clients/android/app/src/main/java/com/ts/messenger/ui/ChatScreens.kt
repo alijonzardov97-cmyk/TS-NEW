@@ -188,7 +188,7 @@ fun ConversationListScreen(
                     }
                 } else {
                     LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 88.dp)) {
-                        items(state.dms, key = { it.otherUser.id }) { dm ->
+                        items(state.dms.sortedByDescending { state.lastActivity[it.channel.id].orEmpty() }, key = { it.otherUser.id }) { dm ->
                             PersonRow(dm.otherUser) { onOpen(dm) }
                         }
                     }

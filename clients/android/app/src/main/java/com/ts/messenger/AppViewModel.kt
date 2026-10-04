@@ -87,6 +87,8 @@ data class UiState(
     val background: Boolean = true,
     /** True while the signed-in user is moving the app to another server address. */
     val movingServer: Boolean = false,
+    /** Channel id -> time of its newest message; the list shows the most recent chat on top. */
+    val lastActivity: Map<String, String> = emptyMap(),
     val uploading: Boolean = false,
     val call: CallUi = CallUi(),
     val safety: SafetyInfo? = null,
@@ -413,8 +415,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             launch {
                 r.changed.collect { ch ->
+                    val msgs = r.cached(ch)
+                    msgs.lastOrNull()?.let { last -> _state.update { it.copy(lastActivity = it.lastActivity + (ch to last.createdAt)) } }
                     if (_state.value.current?.channel?.id == ch) {
-                        _state.update { it.copy(messages = r.cached(ch)) }
+                        _state.update { it.copy(messages = msgs) }
                     }
                 }
             }
@@ -521,7 +525,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 repo?.registerDms(dms)
                 dmIds = dms.map { it.channel.id }
                 socket?.let { s -> dms.forEach { s.subscribe(it.channel.id) } }
-                _state.update { it.copy(dms = dms) }
+                val activity = dms.mapNotNull { d -> repo?.cached(d.channel.id)?.lastOrNull()?.let { d.channel.id to it.createdAt } }.toMap()
+                _state.update { it.copy(dms = dms, lastActivity = it.lastActivity + activity) }
                 pendingCallChannel?.let { ch -> pendingCallChannel = null; calls?.ringFromPush(ch) }
                 pendingChatChannel?.let { ch ->
                     pendingChatChannel = null
