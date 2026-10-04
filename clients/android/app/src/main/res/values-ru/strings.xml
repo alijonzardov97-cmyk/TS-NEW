@@ -39,6 +39,9 @@
     <string name="ttl_day">1 день</string>
     <string name="ttl_week">7 дней</string>
     <string name="ttl_month">30 дней</string>
+    <string name="security_wipe_chats">Удалить все чаты</string>
+    <string name="security_wipe_chats_title">Удалить все чаты?</string>
+    <string name="security_wipe_chats_body">Вся переписка и файлы удалятся с этого телефона. Вход, ключи и аккаунт останутся. Сообщения на сервере больше не покажутся.</string>
     <string name="change_server">Сменить сервер</string>
 
     <string name="login_title">С возвращением!</string>

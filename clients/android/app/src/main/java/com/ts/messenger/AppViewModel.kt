@@ -90,7 +90,8 @@ data class UiState(
     val showSecurity: Boolean = false,
     /** Auto-delete of messages on this phone, in days (0 = never). */
     val ttlDays: Int = 0,
-    val confirmWipe: Boolean = false,
+    /** 0 = no dialog, 1 = delete all chats, 2 = wipe everything. */
+    val confirmWipe: Int = 0,
     /** Notifications show only "new message", without the sender's name. */
     val hideSender: Boolean = true,
     /** Whether the open chat's peer key was compared with the person (and still matches). */
@@ -390,6 +391,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun applyTtl() {
         val r = repo ?: return
         r.ttlDays = ttlSetting()
+        r.clearedBefore = store.getString(K_CLEARED)?.let { runCatching { java.time.Instant.parse(it) }.getOrNull() }
         _state.value.dms.forEach { r.purgeExpired(it.channel.id) }
         _state.value.current?.let { cur -> _state.update { it.copy(messages = r.cached(cur.channel.id)) } }
     }
@@ -402,9 +404,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(hideSender = hide) }
     }
 
-    fun askWipe() = _state.update { it.copy(confirmWipe = true) }
+    fun askWipe(mode: Int) = _state.update { it.copy(confirmWipe = mode) }
 
-    fun cancelWipe() = _state.update { it.copy(confirmWipe = false) }
+    fun cancelWipe() = _state.update { it.copy(confirmWipe = 0) }
+
+    /**
+     * Deletes every conversation from this phone but keeps the account, keys and login. Messages
+     * that are still on the server are not shown again.
+     */
+    fun wipeChats() {
+        val r = repo ?: return
+        val app = getApplication<Application>()
+        val newest = _state.value.dms
+            .flatMap { r.cached(it.channel.id) }
+            .mapNotNull { runCatching { java.time.OffsetDateTime.parse(it.createdAt).toInstant() }.getOrNull() }
+            .maxOrNull() ?: java.time.Instant.now()
+        store.putString(K_CLEARED, newest.toString())
+        r.clearedBefore = newest
+        _state.value.dms.forEach { r.purgeExpired(it.channel.id) }
+        FileService.wipe(app)
+        thumbs.evictAll()
+        _state.update { it.copy(messages = emptyList(), lastActivity = emptyMap(), unread = emptySet(), confirmWipe = 0) }
+    }
 
     /**
      * Emergency wipe: everything on this phone (keys, messages, files, server address, login) is
@@ -471,6 +492,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         fileSvc = fs
         val r = ChatRepository(a, ChatCrypto(store, keyVault), chatLog, sock, me.id, fs)
         r.ttlDays = ttlSetting()
+        r.clearedBefore = store.getString(K_CLEARED)?.let { runCatching { java.time.Instant.parse(it) }.getOrNull() }
         val cm = CallManager(getApplication<Application>(), viewModelScope, sock, me.id, iceServers = { iceCfg }) { ch ->
             _state.value.dms.firstOrNull { it.channel.id == ch }?.let { it.otherUser.id to it.otherUser.displayName }
         }
@@ -1015,6 +1037,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val K_BG = "bg.enabled"
         const val K_HIDE = "notif.hide"
         const val K_TTL = "chat.ttl"
+        const val K_CLEARED = "chat.cleared"
         const val K_SEEN = "chat.seen"
         const val MAX_TEXT_CHARS = 3000
     }

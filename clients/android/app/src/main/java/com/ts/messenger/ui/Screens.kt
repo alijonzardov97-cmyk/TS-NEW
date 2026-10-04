@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -203,7 +204,10 @@ fun AppContent(
             onDismissRequest = vm::dismissSecurity,
             title = { Text(stringResource(R.string.security_title)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
                     androidx.compose.foundation.layout.Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
@@ -227,7 +231,10 @@ fun AppContent(
                             }
                         }
                     }
-                    TextButton(onClick = { vm.dismissSecurity(); vm.askWipe() }) {
+                    TextButton(onClick = { vm.dismissSecurity(); vm.askWipe(1) }) {
+                        Text(stringResource(R.string.security_wipe_chats), color = MaterialTheme.colorScheme.error)
+                    }
+                    TextButton(onClick = { vm.dismissSecurity(); vm.askWipe(2) }) {
                         Text(stringResource(R.string.security_wipe), color = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -235,13 +242,14 @@ fun AppContent(
             confirmButton = { TextButton(onClick = vm::dismissSecurity) { Text(stringResource(R.string.call_ok)) } },
         )
     }
-    if (state.confirmWipe) {
+    if (state.confirmWipe != 0) {
+        val all = state.confirmWipe == 2
         AlertDialog(
             onDismissRequest = vm::cancelWipe,
-            title = { Text(stringResource(R.string.security_wipe_title)) },
-            text = { Text(stringResource(R.string.security_wipe_body)) },
+            title = { Text(stringResource(if (all) R.string.security_wipe_title else R.string.security_wipe_chats_title)) },
+            text = { Text(stringResource(if (all) R.string.security_wipe_body else R.string.security_wipe_chats_body)) },
             confirmButton = {
-                TextButton(onClick = vm::panicWipe) { Text(stringResource(R.string.security_wipe_do), color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = if (all) vm::panicWipe else vm::wipeChats) { Text(stringResource(R.string.security_wipe_do), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = vm::cancelWipe) { Text(stringResource(R.string.pin_cancel)) } },
         )

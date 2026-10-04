@@ -40,15 +40,19 @@ class ChatRepository(
     /** Messages older than this many days are removed from this phone; 0 keeps everything. */
     @Volatile var ttlDays: Int = 0
 
+    /** Messages at or before this moment were deleted by the user and are never shown again. */
+    @Volatile var clearedBefore: java.time.Instant? = null
+
     private fun expired(createdAt: String): Boolean {
-        if (ttlDays <= 0) return false
         val t = runCatching { java.time.OffsetDateTime.parse(createdAt).toInstant() }.getOrNull() ?: return false
+        clearedBefore?.let { if (!t.isAfter(it)) return true }
+        if (ttlDays <= 0) return false
         return t.isBefore(java.time.Instant.now().minus(java.time.Duration.ofDays(ttlDays.toLong())))
     }
 
     /** Drops expired messages from the local log. Returns true if something was removed. */
     fun purgeExpired(channelId: String): Boolean {
-        if (ttlDays <= 0) return false
+        if (ttlDays <= 0 && clearedBefore == null) return false
         val all = log.load(channelId)
         val keep = all.filter { !expired(it.createdAt) }
         if (keep.size == all.size) return false
