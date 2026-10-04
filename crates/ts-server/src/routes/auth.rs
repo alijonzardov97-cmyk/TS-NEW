@@ -115,12 +115,13 @@ pub(crate) fn extract_client_ip(
     });
 
     if trust_headers {
-        // X-Forwarded-For (first entry is the client)
+        // X-Forwarded-For: the LAST entry is the one our own proxy appended; earlier entries
+        // can be written by the client, so they must not be trusted.
         if let Some(xff) = headers.get("x-forwarded-for")
             && let Ok(val) = xff.to_str()
-            && let Some(first) = val.split(',').next()
+            && let Some(last) = val.split(',').next_back()
         {
-            let ip = first.trim();
+            let ip = last.trim();
             if !ip.is_empty() {
                 return Some(ip.to_string());
             }

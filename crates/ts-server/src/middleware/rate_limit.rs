@@ -96,7 +96,8 @@ fn extract_client_ip(request: &Request) -> IpAddr {
                 .get("cf-connecting-ip")
                 .or_else(|| request.headers().get("x-forwarded-for"))
                 .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.split(',').next())
+                // Last entry = the one added by our own proxy (earlier ones are client-written).
+                .and_then(|s| s.split(',').next_back())
                 .and_then(|s| s.trim().parse::<IpAddr>().ok())
         {
             return ip;

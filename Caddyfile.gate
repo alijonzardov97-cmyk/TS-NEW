@@ -9,5 +9,11 @@
 	@admin path /admin /admin/* /api/admin /api/admin/*
 	respond @admin 404
 
-	reverse_proxy ts:8080
+	# The real client address is set here and nowhere else: whatever the client sent in these
+	# headers is thrown away, so it cannot fake an address to dodge login limits.
+	reverse_proxy ts:8080 {
+		header_up -CF-Connecting-IP
+		header_up -X-Real-IP
+		header_up X-Forwarded-For {remote_host}
+	}
 }
