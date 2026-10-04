@@ -29,7 +29,6 @@ use tower_http::trace::TraceLayer;
 
 use crate::app_state::AppState;
 use crate::middleware::auth::auth_middleware;
-use crate::middleware::community_gate::community_gate_middleware;
 use crate::middleware::rate_limit::{auth_rate_limit_middleware, rate_limit_middleware};
 use crate::middleware::security::security_headers;
 use crate::ws::session::ws_upgrade;
@@ -44,19 +43,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let public_routes = auth_routes
         .merge(health::routes())
         .merge(account::public_routes())
-        .merge(push::public_routes())
-        .merge(communities::asset_routes())
-        .merge(groups::asset_routes());
+        .merge(push::public_routes());
 
-    // Community-gated routes (require auth + community membership)
-    let community_gated_routes = Router::new().merge(communities::gated_routes()).layer(
-        axum::middleware::from_fn_with_state(state.clone(), community_gate_middleware),
-    );
+    // Communities and groups are switched off in TS (chat, calls only): their routes are no
+    // longer mounted, so none of that code is reachable from the network.
 
     // Protected routes (auth required)
     let protected_routes = Router::new()
         .merge(channels::routes())
-        .merge(groups::routes())
         .merge(messages::routes())
         .merge(keys::routes())
         .merge(sender_keys::routes())
@@ -67,8 +61,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(account::routes())
         .merge(admin::routes())
         .merge(push::routes())
-        .merge(communities::public_routes())
-        .merge(community_gated_routes)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

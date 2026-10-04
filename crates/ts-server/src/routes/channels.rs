@@ -19,23 +19,11 @@ use crate::middleware::auth::AccessClaims;
 use crate::permissions;
 
 pub fn routes() -> Router<Arc<AppState>> {
+    // TS has direct chats only: creating, joining and moderating group channels is switched off.
     Router::new()
-        .route("/channels", get(list_channels).post(create_channel))
-        .route("/channels/{id}", get(get_channel).patch(update_channel))
-        .route("/channels/{id}/join", post(join_channel))
-        .route("/channels/{id}/leave", post(leave_channel))
+        .route("/channels", get(list_channels))
+        .route("/channels/{id}", get(get_channel))
         .route("/channels/{id}/members", get(list_channel_members))
-        .route(
-            "/channels/{id}/members/{user_id}/role",
-            patch(update_member_role),
-        )
-        .route("/channels/{id}/members/{user_id}/kick", post(kick_member))
-        .route("/channels/{id}/members/{user_id}/ban", post(ban_member))
-        .route("/channels/{id}/members/{user_id}/unban", post(unban_member))
-        .route(
-            "/channels/{id}/transfer-ownership",
-            post(transfer_ownership),
-        )
         .route("/channels/unread", get(get_unread_counts))
         .route("/channels/{id}/read-cursors", get(get_read_cursors))
 }
