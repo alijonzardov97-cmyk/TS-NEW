@@ -188,7 +188,7 @@ fun AppContent(
         Screen.Login -> LoginScreen(state, vm::login, { vm.goTo(Screen.Register) }, vm::changeServer)
         Screen.Register -> RegisterScreen(state, vm::register, { vm.goTo(Screen.Login) })
         is Screen.Recovery -> RecoveryScreen(s.code, vm::recoverySaved)
-        Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice, onEnablePush, vm::disablePush, vm::toggleBackground, vm::startMoveServer)
+        Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice, onEnablePush, vm::disablePush, vm::toggleBackground, vm::startMoveServer, vm::openSecurity)
         Screen.NewChat -> NewChatScreen(state, vm::search, vm::startChatWith, vm::leaveNewChat)
         Screen.Chat -> ChatScreen(state, vm::closeChat, vm::sendMessage, onPickFile, onSaveFile, vm::loadImage, vm::showSafety) { withMic(vm::startCall) }
     }
@@ -197,6 +197,41 @@ fun AppContent(
     }
     state.certChange?.let { change ->
         CertChangedDialog(change, vm::acceptCertChange, vm::rejectCertChange)
+    }
+    if (state.showSecurity) {
+        AlertDialog(
+            onDismissRequest = vm::dismissSecurity,
+            title = { Text(stringResource(R.string.security_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.security_hide_name), style = MaterialTheme.typography.bodyLarge)
+                            Text(stringResource(R.string.security_hide_name_hint), style = MaterialTheme.typography.bodySmall)
+                        }
+                        androidx.compose.material3.Switch(checked = state.hideSender, onCheckedChange = { vm.toggleHideSender() })
+                    }
+                    TextButton(onClick = { vm.dismissSecurity(); vm.askWipe() }) {
+                        Text(stringResource(R.string.security_wipe), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = vm::dismissSecurity) { Text(stringResource(R.string.call_ok)) } },
+        )
+    }
+    if (state.confirmWipe) {
+        AlertDialog(
+            onDismissRequest = vm::cancelWipe,
+            title = { Text(stringResource(R.string.security_wipe_title)) },
+            text = { Text(stringResource(R.string.security_wipe_body)) },
+            confirmButton = {
+                TextButton(onClick = vm::panicWipe) { Text(stringResource(R.string.security_wipe_do), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = vm::cancelWipe) { Text(stringResource(R.string.pin_cancel)) } },
+        )
     }
     state.safety?.let { info ->
         AlertDialog(

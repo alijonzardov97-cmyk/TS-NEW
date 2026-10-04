@@ -87,6 +87,10 @@ data class UiState(
     val background: Boolean = true,
     /** True while the signed-in user is moving the app to another server address. */
     val movingServer: Boolean = false,
+    val showSecurity: Boolean = false,
+    val confirmWipe: Boolean = false,
+    /** Notifications show only "new message", without the sender's name. */
+    val hideSender: Boolean = true,
     /** Whether the open chat's peer key was compared with the person (and still matches). */
     val trust: Trust = Trust.Unverified,
     /** Channels whose newest incoming message has not been seen yet (shown as a dot). */
@@ -365,6 +369,42 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             pins = emptyList()
             _state.value = UiState(unlocked = true, screen = Screen.Connect)
         }
+    }
+
+    // ── Security menu ──
+
+    fun openSecurity() = _state.update { it.copy(showSecurity = true, hideSender = store.getString(K_HIDE) != "0") }
+
+    fun dismissSecurity() = _state.update { it.copy(showSecurity = false) }
+
+    fun toggleHideSender() {
+        val hide = !_state.value.hideSender
+        store.putString(K_HIDE, if (hide) "1" else "0")
+        _state.update { it.copy(hideSender = hide) }
+    }
+
+    fun askWipe() = _state.update { it.copy(confirmWipe = true) }
+
+    fun cancelWipe() = _state.update { it.copy(confirmWipe = false) }
+
+    /**
+     * Emergency wipe: everything on this phone (keys, messages, files, server address, login) is
+     * deleted at once, without waiting for the network. The account itself stays on the server.
+     */
+    fun panicWipe() {
+        val app = getApplication<Application>()
+        runCatching { UnifiedPush.unregister(app) }
+        com.ts.messenger.push.ListenService.stop(app)
+        stopChat()
+        store.wipeAll()
+        FileService.wipe(app)
+        thumbs.evictAll()
+        fileSvc = null
+        api = null
+        baseUrl = null
+        pins = emptyList()
+        seen = null
+        _state.value = UiState(unlocked = true, screen = Screen.Connect)
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
@@ -952,6 +992,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val K_REFRESH = "auth.refresh"
         const val K_USER = "auth.user"
         const val K_BG = "bg.enabled"
+        const val K_HIDE = "notif.hide"
         const val K_SEEN = "chat.seen"
         const val MAX_TEXT_CHARS = 3000
     }

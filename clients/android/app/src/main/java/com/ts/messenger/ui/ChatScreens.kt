@@ -79,6 +79,7 @@ fun ConversationListScreen(
     onDisablePush: () -> Unit,
     onToggleBackground: () -> Unit,
     onChangeAddress: () -> Unit,
+    onSecurity: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -128,6 +129,10 @@ fun ConversationListScreen(
                                         ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                                     }
                                 },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.security_menu)) },
+                                onClick = { menuOpen = false; onSecurity() },
                             )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.move_server)) },

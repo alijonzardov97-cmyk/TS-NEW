@@ -60,7 +60,10 @@ object Notifications {
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
         ensureChannel(context)
-        val sender = payload?.senderName?.let(::clean)?.takeIf { it.isNotEmpty() }
+        val hide = runCatching {
+            com.ts.messenger.security.SecureStore(context.applicationContext).getString("notif.hide") != "0"
+        }.getOrDefault(true)
+        val sender = if (hide) null else payload?.senderName?.let(::clean)?.takeIf { it.isNotEmpty() }
         val open = PendingIntent.getActivity(
             context, (payload?.channelId ?: "").hashCode(),
             Intent(context, MainActivity::class.java)

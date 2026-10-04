@@ -25,6 +25,14 @@
     <string name="trust_changed">keys changed!</string>
     <string name="trust_confirm">Matches, mark verified</string>
     <string name="trust_remove">Remove mark</string>
+    <string name="security_menu">Security</string>
+    <string name="security_title">Security</string>
+    <string name="security_hide_name">Hide name in notifications</string>
+    <string name="security_hide_name_hint">Notifications show only “New message”, without the sender’s name.</string>
+    <string name="security_wipe">Emergency wipe</string>
+    <string name="security_wipe_title">Wipe all data?</string>
+    <string name="security_wipe_body">Keys, messages, files and the login are deleted from this phone at once and for good. The account stays on the server. You will need new keys to read conversations again.</string>
+    <string name="security_wipe_do">Wipe</string>
     <string name="change_server">Change server</string>
 
     <string name="login_title">Welcome back</string>

@@ -25,6 +25,14 @@
     <string name="trust_changed">ключи изменились!</string>
     <string name="trust_confirm">Совпадает, отметить</string>
     <string name="trust_remove">Снять отметку</string>
+    <string name="security_menu">Безопасность</string>
+    <string name="security_title">Безопасность</string>
+    <string name="security_hide_name">Скрывать имя в уведомлениях</string>
+    <string name="security_hide_name_hint">В уведомлении будет только «Новое сообщение», без имени отправителя.</string>
+    <string name="security_wipe">Экстренно стереть данные</string>
+    <string name="security_wipe_title">Стереть все данные?</string>
+    <string name="security_wipe_body">С этого телефона сразу и безвозвратно удалятся ключи шифрования, переписка, файлы и вход. Аккаунт на сервере останется. Чтобы читать переписку снова, понадобятся новые ключи.</string>
+    <string name="security_wipe_do">Стереть</string>
     <string name="change_server">Сменить сервер</string>
 
     <string name="login_title">С возвращением!</string>
