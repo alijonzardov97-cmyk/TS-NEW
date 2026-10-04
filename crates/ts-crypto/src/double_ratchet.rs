@@ -25,6 +25,8 @@ use crate::types::SecretKey;
 /// Maximum number of skipped message keys to store.
 /// Prevents a DoS where a malicious sender claims a huge message counter.
 const MAX_SKIP: u32 = 1000;
+/// Upper bound on skipped message keys kept in one session (memory / state size).
+const MAX_STORED_SKIPPED: usize = 2000;
 
 /// HKDF info for root key ratchet.
 const RATCHET_INFO: &[u8] = b"ts-ratchet";
@@ -71,6 +73,56 @@ struct SkippedKey {
     message_number: u32,
 }
 
+/// (De)serialization of the skipped-keys map as a list of `(key, message_key)` pairs.
+mod skipped_serde {
+    use super::SkippedKey;
+    use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
+    use serde::{Serialize, Serializer};
+    use std::collections::HashMap;
+    use std::fmt;
+
+    pub fn serialize<S: Serializer>(
+        map: &HashMap<SkippedKey, [u8; 32]>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let pairs: Vec<(&SkippedKey, &[u8; 32])> = map.iter().collect();
+        pairs.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<HashMap<SkippedKey, [u8; 32]>, D::Error> {
+        struct SkippedVisitor;
+
+        impl<'de> Visitor<'de> for SkippedVisitor {
+            type Value = HashMap<SkippedKey, [u8; 32]>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a list of skipped message keys")
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut out = HashMap::new();
+                while let Some((k, v)) = seq.next_element::<(SkippedKey, [u8; 32])>()? {
+                    out.insert(k, v);
+                }
+                Ok(out)
+            }
+
+            // Sessions saved by older builds wrote an object. Only an empty one could ever
+            // have been written (a non-empty map failed to serialize), so accept just that.
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                if map.next_key::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom("unsupported legacy skipped_keys map"));
+                }
+                Ok(HashMap::new())
+            }
+        }
+
+        deserializer.deserialize_any(SkippedVisitor)
+    }
+}
+
 /// The Double Ratchet session state.
 ///
 /// Each party maintains one of these for each conversation.
@@ -100,6 +152,11 @@ pub struct RatchetSession {
     previous_send_count: u32,
 
     /// Skipped message keys for out-of-order decryption.
+    ///
+    /// Stored as a list of pairs: JSON object keys must be strings, so a map with a
+    /// struct key cannot be serialized (that used to break saving the session as soon
+    /// as one message was skipped).
+    #[serde(with = "skipped_serde")]
     skipped_keys: HashMap<SkippedKey, [u8; 32]>,
 }
 
@@ -289,7 +346,11 @@ impl RatchetSession {
 
     /// Store skipped message keys up to the given message number.
     fn skip_messages(&mut self, until: u32) -> Result<(), RatchetError> {
-        if self.recv_count + MAX_SKIP < until {
+        if self.recv_count.saturating_add(MAX_SKIP) < until {
+            return Err(RatchetError::TooManySkipped);
+        }
+        let needed = until.saturating_sub(self.recv_count) as usize;
+        if self.skipped_keys.len().saturating_add(needed) > MAX_STORED_SKIPPED {
             return Err(RatchetError::TooManySkipped);
         }
 
@@ -437,6 +498,49 @@ mod tests {
         assert_eq!(bob.decrypt(&m3).unwrap(), b"third");
         assert_eq!(bob.decrypt(&m1).unwrap(), b"first");
         assert_eq!(bob.decrypt(&m2).unwrap(), b"second");
+    }
+
+    #[test]
+    fn test_serialize_with_skipped_keys() {
+        let (mut alice, mut bob) = setup_sessions();
+
+        let m1 = alice.encrypt(b"first").unwrap();
+        let _m2 = alice.encrypt(b"second").unwrap();
+        let m3 = alice.encrypt(b"third").unwrap();
+
+        // m2 is lost: m3 arrives first, which leaves skipped keys in the state.
+        assert_eq!(bob.decrypt(&m3).unwrap(), b"third");
+        let bytes = bob.serialize().expect("session with skipped keys must serialize");
+        let mut restored = RatchetSession::deserialize(&bytes).unwrap();
+        assert_eq!(restored.decrypt(&m1).unwrap(), b"first");
+    }
+
+    #[test]
+    fn test_deserialize_legacy_empty_skipped_map() {
+        let (_alice, bob) = setup_sessions();
+        let json = String::from_utf8(bob.serialize().unwrap()).unwrap();
+        // Sessions written by older builds contain `"skipped_keys":{}`.
+        let legacy = json.replace("\"skipped_keys\":[]", "\"skipped_keys\":{}");
+        assert!(legacy.contains("\"skipped_keys\":{}"));
+        RatchetSession::deserialize(legacy.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn test_skipped_keys_total_is_capped() {
+        let (mut alice, mut bob) = setup_sessions();
+        let mut refused = false;
+        // Each round skips 900 keys (under MAX_SKIP); the stored total must stay bounded.
+        for _ in 0..6 {
+            for _ in 0..900 {
+                let _ = alice.encrypt(b"x").unwrap();
+            }
+            let msg = alice.encrypt(b"y").unwrap();
+            if bob.decrypt(&msg).is_err() {
+                refused = true;
+                break;
+            }
+        }
+        assert!(refused, "total skipped keys must be capped");
     }
 
     #[test]
