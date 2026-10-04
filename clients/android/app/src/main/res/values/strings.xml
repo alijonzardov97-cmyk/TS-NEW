@@ -33,6 +33,12 @@
     <string name="security_wipe_title">Wipe all data?</string>
     <string name="security_wipe_body">Keys, messages, files and the login are deleted from this phone at once and for good. The account stays on the server. You will need new keys to read conversations again.</string>
     <string name="security_wipe_do">Wipe</string>
+    <string name="security_ttl">Auto-delete messages</string>
+    <string name="security_ttl_hint">Messages older than the chosen time are deleted from this phone. The encrypted copy stays on the server but cannot be read without your keys.</string>
+    <string name="ttl_off">Off</string>
+    <string name="ttl_day">1 day</string>
+    <string name="ttl_week">7 days</string>
+    <string name="ttl_month">30 days</string>
     <string name="change_server">Change server</string>
 
     <string name="login_title">Welcome back</string>

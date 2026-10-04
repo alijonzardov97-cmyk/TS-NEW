@@ -33,6 +33,12 @@
     <string name="security_wipe_title">Стереть все данные?</string>
     <string name="security_wipe_body">С этого телефона сразу и безвозвратно удалятся ключи шифрования, переписка, файлы и вход. Аккаунт на сервере останется. Чтобы читать переписку снова, понадобятся новые ключи.</string>
     <string name="security_wipe_do">Стереть</string>
+    <string name="security_ttl">Автоудаление переписки</string>
+    <string name="security_ttl_hint">Сообщения старше выбранного срока удаляются с этого телефона. Копия, зашифрованная для собеседника, остаётся на сервере, но прочитать её без ваших ключей нельзя.</string>
+    <string name="ttl_off">Выкл</string>
+    <string name="ttl_day">1 день</string>
+    <string name="ttl_week">7 дней</string>
+    <string name="ttl_month">30 дней</string>
     <string name="change_server">Сменить сервер</string>
 
     <string name="login_title">С возвращением!</string>

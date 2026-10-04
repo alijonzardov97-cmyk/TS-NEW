@@ -35,6 +35,12 @@ class ChatLog(private val store: SecureStore) {
         return merged
     }
 
+    /** Replaces the whole log of a conversation (used when old messages are purged). */
+    @Synchronized
+    fun replace(channelId: String, messages: List<ChatMessage>) {
+        store.putString(key(channelId), AppJson.encodeToString(serializer, messages))
+    }
+
     private fun key(channelId: String): String {
         require(channelId.matches(Regex("[0-9a-fA-F-]{36}"))) { "bad channel id" }
         return "chat.${channelId.lowercase()}"

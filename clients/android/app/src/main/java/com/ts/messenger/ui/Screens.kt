@@ -214,6 +214,19 @@ fun AppContent(
                         }
                         androidx.compose.material3.Switch(checked = state.hideSender, onCheckedChange = { vm.toggleHideSender() })
                     }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(stringResource(R.string.security_ttl), style = MaterialTheme.typography.bodyLarge)
+                        Text(stringResource(R.string.security_ttl_hint), style = MaterialTheme.typography.bodySmall)
+                        androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(0 to R.string.ttl_off, 1 to R.string.ttl_day, 7 to R.string.ttl_week, 30 to R.string.ttl_month).forEach { (days, label) ->
+                                androidx.compose.material3.FilterChip(
+                                    selected = state.ttlDays == days,
+                                    onClick = { vm.setTtl(days) },
+                                    label = { Text(stringResource(label)) },
+                                )
+                            }
+                        }
+                    }
                     TextButton(onClick = { vm.dismissSecurity(); vm.askWipe() }) {
                         Text(stringResource(R.string.security_wipe), color = MaterialTheme.colorScheme.error)
                     }

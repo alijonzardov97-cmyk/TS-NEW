@@ -88,6 +88,8 @@ data class UiState(
     /** True while the signed-in user is moving the app to another server address. */
     val movingServer: Boolean = false,
     val showSecurity: Boolean = false,
+    /** Auto-delete of messages on this phone, in days (0 = never). */
+    val ttlDays: Int = 0,
     val confirmWipe: Boolean = false,
     /** Notifications show only "new message", without the sender's name. */
     val hideSender: Boolean = true,
@@ -373,7 +375,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Security menu ──
 
-    fun openSecurity() = _state.update { it.copy(showSecurity = true, hideSender = store.getString(K_HIDE) != "0") }
+    fun openSecurity() = _state.update { it.copy(showSecurity = true, hideSender = store.getString(K_HIDE) != "0", ttlDays = ttlSetting()) }
+
+    private fun ttlSetting(): Int = store.getString(K_TTL)?.toIntOrNull()?.takeIf { it in setOf(0, 1, 7, 30) } ?: 0
+
+    fun setTtl(days: Int) {
+        if (days !in setOf(0, 1, 7, 30)) return
+        store.putString(K_TTL, days.toString())
+        _state.update { it.copy(ttlDays = days) }
+        applyTtl()
+    }
+
+    /** Applies the auto-delete setting to every conversation and refreshes the open one. */
+    private fun applyTtl() {
+        val r = repo ?: return
+        r.ttlDays = ttlSetting()
+        _state.value.dms.forEach { r.purgeExpired(it.channel.id) }
+        _state.value.current?.let { cur -> _state.update { it.copy(messages = r.cached(cur.channel.id)) } }
+    }
 
     fun dismissSecurity() = _state.update { it.copy(showSecurity = false) }
 
@@ -451,6 +470,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val fs = FileService(getApplication<Application>(), a)
         fileSvc = fs
         val r = ChatRepository(a, ChatCrypto(store, keyVault), chatLog, sock, me.id, fs)
+        r.ttlDays = ttlSetting()
         val cm = CallManager(getApplication<Application>(), viewModelScope, sock, me.id, iceServers = { iceCfg }) { ch ->
             _state.value.dms.firstOrNull { it.channel.id == ch }?.let { it.otherUser.id to it.otherUser.displayName }
         }
@@ -630,6 +650,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 socket?.let { s -> dms.forEach { s.subscribe(it.channel.id) } }
                 val activity = dms.mapNotNull { d -> repo?.cached(d.channel.id)?.lastOrNull()?.let { d.channel.id to it.createdAt } }.toMap()
                 _state.update { it.copy(dms = dms, lastActivity = it.lastActivity + activity) }
+                applyTtl()
                 seenMap()
                 recomputeUnread()
                 // Pick up what arrived while the app was closed, so order and dots are right.
@@ -993,6 +1014,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val K_USER = "auth.user"
         const val K_BG = "bg.enabled"
         const val K_HIDE = "notif.hide"
+        const val K_TTL = "chat.ttl"
         const val K_SEEN = "chat.seen"
         const val MAX_TEXT_CHARS = 3000
     }
