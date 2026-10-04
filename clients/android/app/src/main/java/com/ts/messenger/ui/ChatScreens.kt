@@ -376,7 +376,22 @@ fun ChatScreen(
                 }
             } else {
                 val reversed = remember(state.messages) { state.messages.asReversed() }
+                val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+                // Keep the newest message in view: when a message arrives (and you are at the bottom
+                // or it is yours) and when the keyboard opens, jump to the latest one.
+                val newestId = reversed.firstOrNull()?.id
+                val newestMine = reversed.firstOrNull()?.let { it.senderId != other.id } ?: false
+                androidx.compose.runtime.LaunchedEffect(newestId) {
+                    if (newestId != null && (newestMine || listState.firstVisibleItemIndex <= 2)) {
+                        listState.animateScrollToItem(0)
+                    }
+                }
+                val imeOpen = androidx.compose.foundation.layout.WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+                androidx.compose.runtime.LaunchedEffect(imeOpen) {
+                    if (imeOpen) listState.scrollToItem(0)
+                }
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     reverseLayout = true,
                     contentPadding = PaddingValues(vertical = 8.dp),
