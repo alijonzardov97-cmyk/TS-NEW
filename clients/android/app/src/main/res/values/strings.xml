@@ -165,4 +165,7 @@
     <string name="bg_enable">Turn on background mode</string>
     <string name="bg_disable">Turn off background mode</string>
     <string name="bg_battery">Battery settings</string>
+    <string name="security_presence">Show that I’m online</string>
+    <string name="security_presence_hint">Chat partners who also share their status can see when you are online. Off by default; if you turn it off, you do not see theirs either.</string>
+    <string name="presence_online">online</string>
 </resources>

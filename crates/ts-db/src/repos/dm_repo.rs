@@ -139,3 +139,17 @@ pub async fn list_user_dms(
 
     Ok(results)
 }
+
+/// IDs of everyone this user has a direct-message pair with.
+pub async fn list_dm_partner_ids(pool: &PgPool, user_id: Uuid) -> Result<Vec<Uuid>, sqlx::Error> {
+    let pairs = sqlx::query_as::<_, DmPair>(
+        "SELECT * FROM dm_pairs WHERE user_a = $1 OR user_b = $1",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(pairs
+        .into_iter()
+        .map(|p| if p.user_a == user_id { p.user_b } else { p.user_a })
+        .collect())
+}

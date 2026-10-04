@@ -95,6 +95,10 @@ data class UiState(
     val confirmWipe: Int = 0,
     /** Notifications show only "new message", without the sender's name. */
     val hideSender: Boolean = true,
+    /** Share my "online" status with chat partners who share theirs (off by default). */
+    val showPresence: Boolean = false,
+    /** Partners who share their status and are online now (empty unless showPresence). */
+    val onlinePeers: Set<String> = emptySet(),
     /** Whether the open chat's peer key was compared with the person (and still matches). */
     val trust: Trust = Trust.Unverified,
     /** Channels whose newest incoming message has not been seen yet (shown as a dot). */
@@ -378,7 +382,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Security menu ──
 
-    fun openSecurity() = _state.update { it.copy(showSecurity = true, hideSender = store.getString(K_HIDE) != "0", ttlDays = ttlSetting()) }
+    fun openSecurity() = _state.update { it.copy(showSecurity = true, hideSender = store.getString(K_HIDE) != "0", showPresence = presenceOn(), ttlDays = ttlSetting()) }
 
     private fun ttlSetting(): Int = store.getString(K_TTL)?.toIntOrNull()?.takeIf { it in setOf(0, 1, 7, 30) } ?: 0
 
@@ -399,6 +403,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun dismissSecurity() = _state.update { it.copy(showSecurity = false) }
+
+    private fun presenceOn(): Boolean = store.getString(K_PRESENCE) == "1"
+
+    private fun sendPresence(on: Boolean) {
+        socket?.sendJson(kotlinx.serialization.json.buildJsonObject {
+            put("type", kotlinx.serialization.json.JsonPrimitive("update_presence"))
+            put("status", kotlinx.serialization.json.JsonPrimitive(if (on) "online" else "offline"))
+        })
+    }
+
+    fun togglePresence() {
+        val on = !_state.value.showPresence
+        store.putString(K_PRESENCE, if (on) "1" else "0")
+        _state.update { it.copy(showPresence = on, onlinePeers = if (on) it.onlinePeers else emptySet()) }
+        sendPresence(on)
+    }
 
     fun toggleHideSender() {
         val hide = !_state.value.hideSender
@@ -547,8 +567,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // Sequential on purpose: incoming messages are decrypted in arrival order.
                 sock.events.collect { e ->
                     when (e) {
-                        SocketEvent.Ready -> { _state.update { it.copy(connected = true) }; replenishKeys() }
-                        SocketEvent.Closed -> _state.update { it.copy(connected = false) }
+                        SocketEvent.Ready -> { _state.update { it.copy(connected = true) }; replenishKeys(); if (presenceOn()) sendPresence(true) }
+                        SocketEvent.Closed -> _state.update { it.copy(connected = false, onlinePeers = emptySet()) }
+                        is SocketEvent.Presence -> if (presenceOn()) _state.update { s ->
+                            s.copy(onlinePeers = if (e.online) s.onlinePeers + e.userId else s.onlinePeers - e.userId)
+                        }
+                        is SocketEvent.PresenceBulk -> if (presenceOn()) _state.update { it.copy(onlinePeers = e.onlineIds.toSet()) }
                         is SocketEvent.Incoming -> {
                             runCatching { r.onIncoming(e.message) }
                             notifyIncoming(e.message)
@@ -1081,6 +1105,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val K_USER = "auth.user"
         const val K_BG = "bg.enabled"
         const val K_HIDE = "notif.hide"
+        const val K_PRESENCE = "presence.show"
         const val K_TTL = "chat.ttl"
         const val K_CLEARED = "chat.cleared"
         const val K_SEEN = "chat.seen"

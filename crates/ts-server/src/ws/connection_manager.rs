@@ -1,4 +1,4 @@
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
 
@@ -38,6 +38,8 @@ pub struct ConnectionManager {
     /// Per-user message rate limiter (token bucket, shared across all sessions).
     /// Prevents a single user from flooding via multiple concurrent connections.
     user_rate_limits: DashMap<Uuid, UserRateBucket>,
+    /// Users who opted in to showing their "online" status (off by default).
+    presence_visible: DashSet<Uuid>,
 }
 
 /// Maximum concurrent WebSocket sessions per user (multi-device support).
@@ -52,6 +54,7 @@ impl ConnectionManager {
             reaction_cooldowns: DashMap::new(),
             voice_cooldowns: DashMap::new(),
             user_rate_limits: DashMap::new(),
+            presence_visible: DashSet::new(),
         }
     }
 
@@ -124,6 +127,20 @@ impl ConnectionManager {
                 self.user_rate_limits.remove(&user_id);
             }
         }
+    }
+
+    /// Opt a user in or out of sharing their online status.
+    pub fn set_presence_visible(&self, user_id: Uuid, visible: bool) {
+        if visible {
+            self.presence_visible.insert(user_id);
+        } else {
+            self.presence_visible.remove(&user_id);
+        }
+    }
+
+    /// Whether the user has opted in to sharing their online status.
+    pub fn is_presence_visible(&self, user_id: &Uuid) -> bool {
+        self.presence_visible.contains(user_id)
     }
 
     /// Check if a user has any active connections.

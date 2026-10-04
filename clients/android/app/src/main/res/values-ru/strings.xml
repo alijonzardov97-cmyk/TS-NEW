@@ -165,4 +165,7 @@
     <string name="bg_enable">Включить работу в фоне</string>
     <string name="bg_disable">Выключить работу в фоне</string>
     <string name="bg_battery">Настройки батареи</string>
+    <string name="security_presence">Показывать, что я в сети</string>
+    <string name="security_presence_hint">Собеседники, которые тоже включили этот пункт, увидят, когда вы в сети. По умолчанию выключено; если выключить, их статус вы тоже не увидите.</string>
+    <string name="presence_online">в сети</string>
 </resources>

@@ -31,6 +31,10 @@ sealed interface SocketEvent {
     /** The server accepted one of our messages. */
     data class Sent(val id: String, val channelId: String, val createdAt: String) : SocketEvent
     data object Closed : SocketEvent
+    /** A chat partner who shares their status came online or went offline. */
+    data class Presence(val userId: String, val online: Boolean) : SocketEvent
+    /** Which partners who share their status are online right now. */
+    data class PresenceBulk(val onlineIds: List<String>) : SocketEvent
     /** Call signalling and voice-channel state, handled by the call manager. */
     data class Voice(val type: String, val data: JsonObject) : SocketEvent
 }
@@ -146,6 +150,20 @@ class ChatSocket(
                     "voice_state_update", "user_joined_voice", "user_left_voice",
                     "rtc_offer", "rtc_answer", "rtc_ice_candidate" ->
                         _events.tryEmit(SocketEvent.Voice(obj.str("type")!!, obj))
+                    "presence_update" -> {
+                        val uid = obj.str("user_id")
+                        if (uid != null) _events.tryEmit(SocketEvent.Presence(uid, obj.str("status") == "online"))
+                    }
+                    "presence_bulk" -> {
+                        val arr = obj["statuses"] as? JsonArray
+                        val ids = arr?.mapNotNull { row ->
+                            val r = row as? JsonArray ?: return@mapNotNull null
+                            val id = (r.getOrNull(0) as? JsonPrimitive)?.content
+                            val st = (r.getOrNull(1) as? JsonPrimitive)?.content
+                            if (id != null && st == "online") id else null
+                        } ?: emptyList()
+                        _events.tryEmit(SocketEvent.PresenceBulk(ids))
+                    }
                     "message_sent" -> {
                         val id = obj.str("id"); val ch = obj.str("channel_id"); val at = obj.str("created_at")
                         if (id != null && ch != null && at != null) _events.tryEmit(SocketEvent.Sent(id, ch, at))

@@ -8,7 +8,7 @@ use uuid::Uuid;
 use ts_common::ws_messages::{ClientMessage, MessageType, ServerMessage};
 use ts_db::models::channel::ChannelType;
 use ts_db::repos::{
-    block_repo, channel_repo, community_repo, message_repo, reaction_repo, timeout_repo,
+    block_repo, channel_repo, community_repo, dm_repo, message_repo, reaction_repo, timeout_repo,
     unread_repo, user_repo, voice_repo,
 };
 
@@ -47,25 +47,8 @@ pub async fn handle_socket(
         return;
     }
 
-    // Broadcast presence: this user is online
-    broadcast_presence(&state.db, conn_mgr, user_id, "online").await;
-
-    // Send initial presence state: which community mates are currently online
-    if let Ok(mates) = community_repo::get_community_mates(&state.db, user_id).await {
-        let statuses: Vec<_> = mates
-            .into_iter()
-            .filter(|uid| conn_mgr.is_online(uid))
-            .map(|uid| {
-                (
-                    uid,
-                    ts_common::ws_messages::PresenceStatus::Online,
-                )
-            })
-            .collect();
-        if !statuses.is_empty() {
-            let _ = tx.send(ServerMessage::PresenceBulk { statuses });
-        }
-    }
+    // Presence is opt-in: nothing is announced on connect. The client sends
+    // UpdatePresence{online} only if the user switched "show that I'm online" on.
 
     tracing::info!(%user_id, %session_id, "WebSocket connected");
 
@@ -260,7 +243,7 @@ pub async fn handle_socket(
 
     // If no more sessions for this user, broadcast offline (checked after grace period
     // by the voice cleanup task above — also check immediately for non-voice users)
-    if !conn_mgr.is_online(&user_id) {
+    if !conn_mgr.is_online(&user_id) && conn_mgr.is_presence_visible(&user_id) {
         broadcast_presence(&state.db, conn_mgr, user_id, "offline").await;
     }
 
@@ -803,6 +786,18 @@ async fn handle_client_message(
         ClientMessage::UpdatePresence { status } => {
             let status_str = format!("{:?}", status).to_lowercase();
             broadcast_presence(&state.db, conn_mgr, user_id, &status_str).await;
+            if status_str == "online" {
+                // Reciprocity: someone who shows their status also sees who is online
+                // among their chat partners who show theirs.
+                if let Ok(partners) = dm_repo::list_dm_partner_ids(&state.db, user_id).await {
+                    let statuses: Vec<_> = partners
+                        .into_iter()
+                        .filter(|uid| conn_mgr.is_online(uid) && conn_mgr.is_presence_visible(uid))
+                        .map(|uid| (uid, ts_common::ws_messages::PresenceStatus::Online))
+                        .collect();
+                    let _ = tx.send(ServerMessage::PresenceBulk { statuses });
+                }
+            }
         }
 
         ClientMessage::Subscribe { channel_ids } => {
@@ -1557,13 +1552,13 @@ async fn broadcast_presence(
     user_id: Uuid,
     status: &str,
 ) {
-    let presence_status = match status {
-        "online" => ts_common::ws_messages::PresenceStatus::Online,
-        "idle" => ts_common::ws_messages::PresenceStatus::Idle,
-        "dnd" => ts_common::ws_messages::PresenceStatus::Dnd,
-        // Invisible users appear as offline to others
-        "invisible" => ts_common::ws_messages::PresenceStatus::Offline,
-        _ => ts_common::ws_messages::PresenceStatus::Offline,
+    // Only an explicit "online" is shared; anything else hides the user.
+    let visible = status == "online";
+    conn_mgr.set_presence_visible(user_id, visible);
+    let presence_status = if visible {
+        ts_common::ws_messages::PresenceStatus::Online
+    } else {
+        ts_common::ws_messages::PresenceStatus::Offline
     };
 
     let msg = ServerMessage::PresenceUpdate {
@@ -1571,17 +1566,17 @@ async fn broadcast_presence(
         status: presence_status,
     };
 
-    // Only send to users who share a community with this user
-    match community_repo::get_community_mates(db, user_id).await {
-        Ok(mates) => {
-            for uid in mates {
-                if conn_mgr.is_online(&uid) {
+    // Only chat partners who also opted in are told (and never anyone else).
+    match dm_repo::list_dm_partner_ids(db, user_id).await {
+        Ok(partners) => {
+            for uid in partners {
+                if conn_mgr.is_online(&uid) && conn_mgr.is_presence_visible(&uid) {
                     conn_mgr.send_to_user(&uid, &msg);
                 }
             }
         }
         Err(e) => {
-            tracing::warn!("Failed to get community mates for presence broadcast: {e}");
+            tracing::warn!("Failed to get chat partners for presence broadcast: {e}");
         }
     }
 }

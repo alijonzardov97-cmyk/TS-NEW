@@ -219,6 +219,16 @@ fun AppContent(
                         }
                         androidx.compose.material3.Switch(checked = state.hideSender, onCheckedChange = { vm.toggleHideSender() })
                     }
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.security_presence), style = MaterialTheme.typography.bodyLarge)
+                            Text(stringResource(R.string.security_presence_hint), style = MaterialTheme.typography.bodySmall)
+                        }
+                        androidx.compose.material3.Switch(checked = state.showPresence, onCheckedChange = { vm.togglePresence() })
+                    }
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(stringResource(R.string.security_ttl), style = MaterialTheme.typography.bodyLarge)
                         Text(stringResource(R.string.security_ttl_hint), style = MaterialTheme.typography.bodySmall)

@@ -338,6 +338,9 @@ fun ChatScreen(
                         Spacer(Modifier.width(4.dp))
                         Text(stringResource(trustText), style = MaterialTheme.typography.bodySmall, color = trustColor, maxLines = 1)
                     }
+                    if (state.showPresence && state.onlinePeers.contains(other.id)) {
+                        Text(stringResource(R.string.presence_online), style = MaterialTheme.typography.bodySmall, color = colors.primary, maxLines = 1)
+                    }
                 }
                 IconBtn(IconKind.Shield, colors.onSurfaceVariant, onClick = onSafety)
                 IconBtn(IconKind.Phone, colors.primary, enabled = state.connected, onClick = onCall)
