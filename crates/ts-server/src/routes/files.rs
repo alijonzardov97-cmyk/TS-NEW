@@ -43,6 +43,14 @@ async fn upload_file(
     Extension(claims): Extension<AccessClaims>,
     mut multipart: axum::extract::Multipart,
 ) -> Result<Json<FileUploadResponse>, AppError> {
+    // An upload is held in memory (several copies while it is processed), and the container has
+    // little RAM. Only a couple of uploads run at once; the rest wait here, before any body is read.
+    static UPLOAD_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+    let _upload_slot = UPLOAD_SLOTS
+        .acquire()
+        .await
+        .map_err(|_| AppError::Internal("upload queue closed".to_string()))?;
+
     let max_size = state.config.max_file_size_mb * 1024 * 1024;
 
     let mut file_data: Option<Vec<u8>> = None;

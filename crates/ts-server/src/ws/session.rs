@@ -14,7 +14,11 @@ use crate::ws::handler;
 /// Authentication is done via the first message (ClientMessage::Authenticate)
 /// rather than via headers, since WebSocket headers are unreliable across browsers.
 pub async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
-    ws.on_upgrade(move |socket| handle_ws_auth(socket, state))
+    // Messages are small JSON (a ciphertext is capped at 64 KiB); refuse anything bigger before
+    // it is buffered, so one client cannot make the server hold tens of megabytes per frame.
+    ws.max_message_size(256 * 1024)
+        .max_frame_size(256 * 1024)
+        .on_upgrade(move |socket| handle_ws_auth(socket, state))
 }
 
 /// First stage: wait for authentication message, then hand off to the main handler.
