@@ -740,6 +740,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openChat(dm: DmChannel) {
         val r = repo ?: return
+        com.ts.messenger.push.Notifications.cancelForChat(getApplication<Application>(), dm.channel.id)
         _state.update { it.copy(screen = Screen.Chat, current = dm, messages = r.cached(dm.channel.id), error = null, trust = Trust.Unverified) }
         updateTrust()
         viewModelScope.launch {

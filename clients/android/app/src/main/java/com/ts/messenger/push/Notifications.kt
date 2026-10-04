@@ -90,6 +90,11 @@ object Notifications {
         runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
     }
 
+    /** Removes the new-message notification of one conversation (when the user opens it). */
+    fun cancelForChat(context: Context, channelId: String) {
+        runCatching { NotificationManagerCompat.from(context).cancel(channelId.hashCode()) }
+    }
+
     const val EXTRA_CHAT_CHANNEL = "ts_chat_channel"
     const val EXTRA_CALL_CHANNEL = "ts_call_channel"
     private const val CALL_CHANNEL_ID = "calls"

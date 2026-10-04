@@ -6,7 +6,37 @@
 # `tailscale serve` (see docs/self-hosting/tailscale.md) then publishes it inside your tailnet
 # over HTTPS with a real Let's Encrypt certificate. Never use `tailscale funnel` for TS.
 # Requires Docker Compose v2.24+ (for `!override`).
+#
+# Admin area: the "gate" container below hides /admin from the tailnet. Point `tailscale serve`
+# at the gate (port 8081) and open the admin page only on the server PC, at
+# http://127.0.0.1:8080/admin
 services:
   ts:
     ports: !override
       - "127.0.0.1:8080:8080"
+
+  gate:
+    image: caddy:2-alpine
+    container_name: ts-gate
+    restart: unless-stopped
+    depends_on:
+      - ts
+    volumes:
+      - ./Caddyfile.gate:/etc/caddy/Caddyfile:ro
+    ports:
+      - "127.0.0.1:8081:8081"
+    networks:
+      - external
+    read_only: true
+    tmpfs:
+      - /data
+      - /config
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"

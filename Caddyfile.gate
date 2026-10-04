@@ -1,0 +1,13 @@
+# Front door for the Tailscale address: everything is passed to the TS server except the admin
+# area, which is reachable only locally (http://127.0.0.1:8080/admin on the server PC itself).
+{
+	admin off
+	auto_https off
+}
+
+:8081 {
+	@admin path /admin /admin/* /api/admin /api/admin/*
+	respond @admin 404
+
+	reverse_proxy ts:8080
+}
