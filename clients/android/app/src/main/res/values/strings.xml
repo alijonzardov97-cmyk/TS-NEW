@@ -17,6 +17,7 @@
     <string name="pin_hint">Compare this fingerprint with the one your server administrator gave you. TS will remember it and refuse to talk to a server with a different certificate.</string>
     <string name="pin_confirm">It matches — trust this server</string>
     <string name="pin_cancel">Cancel</string>
+    <string name="move_server">Change server address</string>
     <string name="change_server">Change server</string>
 
     <string name="login_title">Welcome back</string>

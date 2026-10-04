@@ -43,7 +43,7 @@ fun LockScreen(noLockSet: Boolean, failed: Boolean, onUnlock: () -> Unit) {
 }
 
 @Composable
-fun ConnectScreen(state: UiState, onConnect: (String) -> Unit) {
+fun ConnectScreen(state: UiState, onConnect: (String) -> Unit, onCancel: (() -> Unit)? = null) {
     var address by rememberSaveable { mutableStateOf("") }
     Page(stringResource(R.string.connect_title)) {
         Text(stringResource(R.string.connect_hint), style = MaterialTheme.typography.bodyMedium)
@@ -56,6 +56,7 @@ fun ConnectScreen(state: UiState, onConnect: (String) -> Unit) {
             stringResource(if (state.busy) R.string.connecting else R.string.connect_button),
             busy = state.busy, enabled = address.isNotBlank(),
         ) { onConnect(address) }
+        if (onCancel != null) LinkButton(stringResource(R.string.pin_cancel), onCancel)
     }
 }
 
@@ -181,12 +182,12 @@ fun AppContent(
         return
     }
     when (val s = state.screen) {
-        Screen.Connect -> ConnectScreen(state, vm::connect)
-        is Screen.ConfirmPin -> ConfirmPinScreen(s.probe, state.busy, state.error, { vm.confirmPin(s.probe) }, vm::cancelPin)
+        Screen.Connect -> ConnectScreen(state, vm::connect, if (state.movingServer) vm::cancelMoveServer else null)
+        is Screen.ConfirmPin -> ConfirmPinScreen(s.probe, state.busy, state.error, { vm.confirmPin(s.probe) }, if (state.movingServer) vm::cancelMoveServer else vm::cancelPin)
         Screen.Login -> LoginScreen(state, vm::login, { vm.goTo(Screen.Register) }, vm::changeServer)
         Screen.Register -> RegisterScreen(state, vm::register, { vm.goTo(Screen.Login) })
         is Screen.Recovery -> RecoveryScreen(s.code, vm::recoverySaved)
-        Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice, onEnablePush, vm::disablePush, vm::toggleBackground)
+        Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice, onEnablePush, vm::disablePush, vm::toggleBackground, vm::startMoveServer)
         Screen.NewChat -> NewChatScreen(state, vm::search, vm::startChatWith, vm::leaveNewChat)
         Screen.Chat -> ChatScreen(state, vm::closeChat, vm::sendMessage, onPickFile, onSaveFile, vm::loadImage, vm::showSafety) { withMic(vm::startCall) }
     }

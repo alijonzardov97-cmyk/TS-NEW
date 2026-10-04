@@ -85,6 +85,8 @@ data class UiState(
     val push: PushStatus = PushStatus.Off,
     /** Background connection (foreground service) switched on by the user; on by default. */
     val background: Boolean = true,
+    /** True while the signed-in user is moving the app to another server address. */
+    val movingServer: Boolean = false,
     val uploading: Boolean = false,
     val call: CallUi = CallUi(),
     val safety: SafetyInfo? = null,
@@ -207,6 +209,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun confirmPin(probe: ServerProbe) {
         val url = probe.baseUrl.toHttpUrlOrNull() ?: return
+        if (_state.value.movingServer) { confirmMove(probe, url); return }
         launchBusy {
             store.putString(K_SERVER_URL, probe.baseUrl)
             store.putString(K_SERVER_PINS, AppJson.encodeToString(probe.pins))
@@ -217,6 +220,36 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun cancelPin() = _state.update { it.copy(screen = Screen.Connect, error = null) }
+
+    /** Menu: point the signed-in app at a new address; the login and encryption keys stay. */
+    fun startMoveServer() = _state.update { it.copy(movingServer = true, screen = Screen.Connect, error = null) }
+
+    fun cancelMoveServer() = _state.update { it.copy(movingServer = false, screen = Screen.Home, error = null) }
+
+    /**
+     * The user compared the new fingerprint. Only now do tokens go to the new address; an
+     * unauthenticated request first checks that a TS server answers there, and on any failure
+     * the old address stays in place.
+     */
+    private fun confirmMove(probe: ServerProbe, url: HttpUrl) {
+        val oldUrl = baseUrl
+        val oldPins = pins
+        launchBusy {
+            try {
+                useServer(url, probe.pins)
+                api!!.config()
+            } catch (e: Exception) {
+                if (oldUrl != null) useServer(oldUrl, oldPins)
+                throw e
+            }
+            store.putString(K_SERVER_URL, probe.baseUrl)
+            store.putString(K_SERVER_PINS, AppJson.encodeToString(probe.pins))
+            stopChat()
+            com.ts.messenger.push.ListenService.stop(getApplication<Application>()) // restarted by startChat() with the new address
+            _state.update { it.copy(movingServer = false, screen = Screen.Home, connected = false) }
+            startChat()
+        }
+    }
 
     fun changeServer() {
         store.remove(K_SERVER_URL)
