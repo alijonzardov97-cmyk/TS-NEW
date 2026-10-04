@@ -233,6 +233,35 @@ class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
             bearer(url("/files/upload"), it).post(body).build()
         }, bulkClient) { AppJson.decodeFromString(it) }
 
+    /** Uploads our profile picture (already cropped and re-encoded as JPEG) and returns the updated profile. */
+    suspend fun uploadAvatar(jpeg: ByteArray): UserPublic =
+        authed({
+            val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+                .addFormDataPart("avatar", "avatar.jpg", jpeg.toRequestBody("image/jpeg".toMediaType()))
+                .build()
+            bearer(url("/account/avatar"), it).post(body).build()
+        }) { AppJson.decodeFromString(it) }
+
+    /** Downloads a profile picture from this server's public avatar path (at most 2 MB). */
+    suspend fun fetchAvatar(path: String): ByteArray = withContext(Dispatchers.IO) {
+        if (!path.startsWith("/api/avatars/")) throw ApiException(400, "", "bad avatar path")
+        val u = baseUrl.resolve(path)
+        if (u == null || u.host != baseUrl.host || !u.isHttps) throw ApiException(400, "", "bad avatar path")
+        try {
+            client.newCall(Request.Builder().url(u).get().build()).execute().use { r ->
+                if (!r.isSuccessful) throw ApiException(r.code, "", "avatar")
+                val source = r.body!!.source()
+                source.request(2_000_001)
+                if (source.buffer.size > 2_000_000) throw ApiException(413, "", "avatar too large")
+                source.readByteArray()
+            }
+        } catch (e: SSLPeerUnverifiedException) {
+            throw CertificateChangedException()
+        } catch (e: IOException) {
+            throw NetworkException(e)
+        }
+    }
+
     /** Best effort removal of one of our own uploads. */
     suspend fun deleteFile(fileId: String) =
         authed({ bearer(url("/files/${checkedId(fileId)}"), it).delete().build() }) { }

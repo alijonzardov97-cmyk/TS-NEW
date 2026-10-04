@@ -42,6 +42,8 @@
     <string name="security_wipe_chats">Удалить все чаты</string>
     <string name="security_wipe_chats_title">Удалить все чаты?</string>
     <string name="security_wipe_chats_body">Вся переписка и файлы удалятся с этого телефона. Вход, ключи и аккаунт останутся. Сообщения на сервере больше не покажутся.</string>
+    <string name="avatar_change">Сменить фото профиля</string>
+    <string name="notice_avatar">Фото профиля обновлено.</string>
     <string name="change_server">Сменить сервер</string>
 
     <string name="login_title">С возвращением!</string>

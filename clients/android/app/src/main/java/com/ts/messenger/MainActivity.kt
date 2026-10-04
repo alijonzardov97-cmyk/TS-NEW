@@ -31,6 +31,9 @@ class MainActivity : FragmentActivity() {
 
     // Pickers live in the activity: the app locks itself while the system picker is in front, and
     // a result must still arrive after the unlock.
+    private val pickAvatar =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) vm.uploadAvatar(uri) }
+
     private val pickFile =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) vm.sendFile(uri) }
 
@@ -123,7 +126,7 @@ class MainActivity : FragmentActivity() {
                 val state by vm.state.collectAsState()
                 val lockAvailable = remember { AppLock.isAvailable(this) }
                 if (state.unlocked) {
-                    AppContent(state, vm, ::enablePush, { pickFile.launch("*/*") }, ::saveFile, ::withMic, ::withCamera)
+                    AppContent(state, vm, ::enablePush, { pickFile.launch("*/*") }, ::saveFile, ::withMic, ::withCamera, { pickAvatar.launch("image/*") })
                 } else {
                     LockScreen(noLockSet = !lockAvailable, failed = unlockFailed, onUnlock = ::promptUnlock)
                 }

@@ -42,6 +42,8 @@
     <string name="security_wipe_chats">Delete all chats</string>
     <string name="security_wipe_chats_title">Delete all chats?</string>
     <string name="security_wipe_chats_body">All messages and files are removed from this phone. Your login, keys and account stay. Messages still on the server will not be shown again.</string>
+    <string name="avatar_change">Change profile photo</string>
+    <string name="notice_avatar">Profile photo updated.</string>
     <string name="change_server">Change server</string>
 
     <string name="login_title">Welcome back</string>

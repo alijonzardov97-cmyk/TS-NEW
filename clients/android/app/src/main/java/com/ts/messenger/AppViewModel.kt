@@ -38,6 +38,7 @@ import com.ts.messenger.net.TsApi
 import com.ts.messenger.net.UserPublic
 import com.ts.messenger.net.parseServerUrl
 import com.ts.messenger.security.SecureStore
+import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -366,6 +367,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             store.wipeAll()
             FileService.wipe(app)
             thumbs.evictAll()
+            com.ts.messenger.ui.AvatarCache.clear()
             fileSvc = null
             api = null
             baseUrl = null
@@ -439,12 +441,53 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.wipeAll()
         FileService.wipe(app)
         thumbs.evictAll()
+        com.ts.messenger.ui.AvatarCache.clear()
         fileSvc = null
         api = null
         baseUrl = null
         pins = emptyList()
         seen = null
         _state.value = UiState(unlocked = true, screen = Screen.Connect)
+    }
+
+    // ── Profile picture ──
+
+    private fun loadAvatars(users: List<UserPublic>) {
+        val a = api ?: return
+        users.forEach { u ->
+            val url = u.avatarUrl ?: return@forEach
+            if (com.ts.messenger.ui.AvatarCache.urls[u.id] == url) return@forEach
+            com.ts.messenger.ui.AvatarCache.urls[u.id] = url
+            viewModelScope.launch {
+                try {
+                    val bytes = a.fetchAvatar(url)
+                    val bmp = withContext(Dispatchers.Default) { com.ts.messenger.ui.decodeAvatar(bytes, 256) } ?: return@launch
+                    com.ts.messenger.ui.AvatarCache.images[u.id] = bmp.asImageBitmap()
+                } catch (_: Exception) {
+                    com.ts.messenger.ui.AvatarCache.urls.remove(u.id)
+                }
+            }
+        }
+    }
+
+    /** The user picked a photo: crop it to a square, strip metadata, upload it as the profile picture. */
+    fun uploadAvatar(uri: android.net.Uri) {
+        val a = api ?: return
+        val app = getApplication<Application>()
+        launchBusy {
+            val jpeg = withContext(Dispatchers.IO) {
+                val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw java.io.IOException("cannot read the image")
+                if (bytes.size > 25_000_000) throw java.io.IOException("image too large")
+                val bmp = com.ts.messenger.ui.decodeAvatar(bytes, 512) ?: throw java.io.IOException("not an image")
+                java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }.toByteArray()
+            }
+            val updated = a.uploadAvatar(jpeg)
+            store.putString(K_USER, AppJson.encodeToString(updated))
+            com.ts.messenger.ui.AvatarCache.urls.remove(updated.id)
+            _state.update { it.copy(user = updated, notice = R.string.notice_avatar) }
+            loadAvatars(listOf(updated))
+        }
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
@@ -672,6 +715,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 socket?.let { s -> dms.forEach { s.subscribe(it.channel.id) } }
                 val activity = dms.mapNotNull { d -> repo?.cached(d.channel.id)?.lastOrNull()?.let { d.channel.id to it.createdAt } }.toMap()
                 _state.update { it.copy(dms = dms, lastActivity = it.lastActivity + activity) }
+                loadAvatars(dms.map { it.otherUser } + listOfNotNull(_state.value.user))
                 applyTtl()
                 seenMap()
                 recomputeUnread()

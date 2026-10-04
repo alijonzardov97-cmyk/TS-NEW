@@ -198,6 +198,16 @@ private val AvatarPalette = listOf(
 fun Avatar(name: String, seed: String, size: Dp = 52.dp) {
     val color = AvatarPalette[(seed.hashCode() and Int.MAX_VALUE) % AvatarPalette.size]
     val letter = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+    val picture = AvatarCache.images[seed]
+    if (picture != null) {
+        androidx.compose.foundation.Image(
+            bitmap = picture,
+            contentDescription = null,
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier.size(size).clip(CircleShape),
+        )
+        return
+    }
     Box(
         modifier = Modifier.size(size).clip(CircleShape).background(color),
         contentAlignment = Alignment.Center,

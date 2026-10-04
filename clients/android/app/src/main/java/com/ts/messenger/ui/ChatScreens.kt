@@ -80,6 +80,7 @@ fun ConversationListScreen(
     onToggleBackground: () -> Unit,
     onChangeAddress: () -> Unit,
     onSecurity: () -> Unit,
+    onPickAvatar: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -88,7 +89,12 @@ fun ConversationListScreen(
         Box(modifier = Modifier.safeDrawingPadding().fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
                 TopBar {
-                    Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
+                    state.user?.let { me ->
+                        Box(modifier = Modifier.padding(start = 12.dp).clickable(onClick = onPickAvatar)) {
+                            Avatar(me.displayName.ifBlank { me.username }, me.id, size = 38.dp)
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                         Text(stringResource(R.string.home_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         state.user?.let {
                             Text(it.displayName, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -129,6 +135,10 @@ fun ConversationListScreen(
                                         ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                                     }
                                 },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.avatar_change)) },
+                                onClick = { menuOpen = false; onPickAvatar() },
                             )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.security_menu)) },

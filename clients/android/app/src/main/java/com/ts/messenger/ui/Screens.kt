@@ -178,6 +178,7 @@ fun AppContent(
     onSaveFile: (com.ts.messenger.net.FileRef) -> Unit,
     withMic: (() -> Unit) -> Unit,
     withCamera: (() -> Unit) -> Unit,
+    onPickAvatar: () -> Unit,
 ) {
     if (state.call.phase != com.ts.messenger.call.CallPhase.Idle) {
         CallScreen(state.call, { withMic(vm::acceptCall) }, vm::declineCall, vm::hangupCall, vm::toggleMute, vm::toggleSpeaker, { withCamera(vm::toggleCamera) }, vm::switchCamera)
@@ -189,7 +190,7 @@ fun AppContent(
         Screen.Login -> LoginScreen(state, vm::login, { vm.goTo(Screen.Register) }, vm::changeServer)
         Screen.Register -> RegisterScreen(state, vm::register, { vm.goTo(Screen.Login) })
         is Screen.Recovery -> RecoveryScreen(s.code, vm::recoverySaved)
-        Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice, onEnablePush, vm::disablePush, vm::toggleBackground, vm::startMoveServer, vm::openSecurity)
+        Screen.Home -> ConversationListScreen(state, vm::openChat, vm::openNewChat, vm::signOut, vm::dismissNotice, onEnablePush, vm::disablePush, vm::toggleBackground, vm::startMoveServer, vm::openSecurity, onPickAvatar)
         Screen.NewChat -> NewChatScreen(state, vm::search, vm::startChatWith, vm::leaveNewChat)
         Screen.Chat -> ChatScreen(state, vm::closeChat, vm::sendMessage, onPickFile, onSaveFile, vm::loadImage, vm::showSafety) { withMic(vm::startCall) }
     }
