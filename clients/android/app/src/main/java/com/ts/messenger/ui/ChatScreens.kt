@@ -500,7 +500,7 @@ private fun Bubble(
     loadImage: suspend (FileRef) -> android.graphics.Bitmap?,
 ) {
     val colors = MaterialTheme.colorScheme
-    val bubbleColor = if (mine) colors.primaryContainer else colors.surface
+    val bubbleColor = if (mine) colors.primaryContainer else Color(0xFF2A3540)
     val textColor = if (mine) colors.onPrimaryContainer else colors.onSurface
     val shape = RoundedCornerShape(
         topStart = 16.dp, topEnd = 16.dp,
@@ -511,7 +511,11 @@ private fun Bubble(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
-        Surface(shape = shape, color = bubbleColor, contentColor = textColor, modifier = Modifier.widthIn(max = 300.dp)) {
+        Surface(
+            shape = shape, color = bubbleColor, contentColor = textColor,
+            border = if (mine) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF45535F)),
+            modifier = Modifier.widthIn(max = 300.dp),
+        ) {
             Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 7.dp, bottom = 5.dp)) {
                 val file = m.file
                 if (m.ok && file != null) {
