@@ -176,9 +176,10 @@ fun AppContent(
     onPickFile: () -> Unit,
     onSaveFile: (com.ts.messenger.net.FileRef) -> Unit,
     withMic: (() -> Unit) -> Unit,
+    withCamera: (() -> Unit) -> Unit,
 ) {
     if (state.call.phase != com.ts.messenger.call.CallPhase.Idle) {
-        CallScreen(state.call, { withMic(vm::acceptCall) }, vm::declineCall, vm::hangupCall, vm::toggleMute, vm::toggleSpeaker)
+        CallScreen(state.call, { withMic(vm::acceptCall) }, vm::declineCall, vm::hangupCall, vm::toggleMute, vm::toggleSpeaker, { withCamera(vm::toggleCamera) }, vm::switchCamera)
         return
     }
     when (val s = state.screen) {

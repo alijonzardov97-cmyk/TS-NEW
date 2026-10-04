@@ -16,7 +16,7 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-enum class IconKind { Back, Send, Plus, Shield, Phone, More, Download, Mic, MicOff, Speaker, Lock, ShieldLock }
+enum class IconKind { Back, Send, Plus, Shield, Phone, More, Download, Mic, MicOff, Speaker, Lock, ShieldLock, Video, VideoOff }
 
 /** Small built-in icon set drawn on a 24-unit grid, so no icon library is needed. */
 @Composable
@@ -96,6 +96,11 @@ fun TsIcon(kind: IconKind, tint: Color, iconSize: Dp = 24.dp, modifier: Modifier
                     )
                     drawRoundRect(tint, Offset(8.5f, 11f), Size(7f, 5.5f), CornerRadius(1.2f, 1.2f))
                     drawPath(Path().apply { moveTo(9.8f, 11f); lineTo(9.8f, 9.6f); cubicTo(9.8f, 6.8f, 14.2f, 6.8f, 14.2f, 9.6f); lineTo(14.2f, 11f) }, tint, style = Stroke(width = 1.4f, cap = StrokeCap.Round))
+                }
+                IconKind.Video, IconKind.VideoOff -> {
+                    drawRoundRect(tint, Offset(3f, 7f), Size(12f, 10f), CornerRadius(2.5f, 2.5f), style = line)
+                    drawPath(Path().apply { moveTo(15f, 11f); lineTo(21f, 7.5f); lineTo(21f, 16.5f); lineTo(15f, 13f) }, tint, style = line)
+                    if (kind == IconKind.VideoOff) drawLine(tint, Offset(4f, 4f), Offset(20f, 20f), 2f, StrokeCap.Round)
                 }
                 IconKind.Speaker -> {
                     drawPath(

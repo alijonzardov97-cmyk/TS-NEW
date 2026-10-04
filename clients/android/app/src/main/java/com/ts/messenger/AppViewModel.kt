@@ -755,6 +755,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun hangupCall() { calls?.hangup() }
     fun toggleMute() { calls?.toggleMute() }
     fun toggleSpeaker() { calls?.toggleSpeaker() }
+    fun toggleCamera() { calls?.toggleCamera() }
+    fun switchCamera() { calls?.switchCamera() }
     fun dismissCallNotice() { calls?.clearNotice() }
 
     /** The user tapped an incoming-call notification. */

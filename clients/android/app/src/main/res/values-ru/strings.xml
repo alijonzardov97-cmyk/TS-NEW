@@ -18,6 +18,8 @@
     <string name="pin_confirm">Совпадает — доверять серверу</string>
     <string name="pin_cancel">Отмена</string>
     <string name="move_server">Сменить адрес сервера</string>
+    <string name="call_camera_on">Видео</string>
+    <string name="call_camera_off">Выкл. видео</string>
     <string name="change_server">Сменить сервер</string>
 
     <string name="login_title">С возвращением!</string>

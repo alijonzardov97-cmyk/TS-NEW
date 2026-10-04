@@ -18,6 +18,8 @@
     <string name="pin_confirm">It matches — trust this server</string>
     <string name="pin_cancel">Cancel</string>
     <string name="move_server">Change server address</string>
+    <string name="call_camera_on">Video</string>
+    <string name="call_camera_off">Video off</string>
     <string name="change_server">Change server</string>
 
     <string name="login_title">Welcome back</string>

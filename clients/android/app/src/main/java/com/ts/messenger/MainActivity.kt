@@ -65,6 +65,23 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    private var afterCamera: (() -> Unit)? = null
+    private val cameraPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val action = afterCamera
+            afterCamera = null
+            if (granted) action?.invoke()
+        }
+
+    private fun withCamera(action: () -> Unit) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            action()
+        } else {
+            afterCamera = action
+            cameraPermission.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     private fun handleIntent(intent: android.content.Intent?) {
         if (intent == null) return
         val id = Regex("[0-9a-fA-F-]{36}")
@@ -106,7 +123,7 @@ class MainActivity : FragmentActivity() {
                 val state by vm.state.collectAsState()
                 val lockAvailable = remember { AppLock.isAvailable(this) }
                 if (state.unlocked) {
-                    AppContent(state, vm, ::enablePush, { pickFile.launch("*/*") }, ::saveFile, ::withMic)
+                    AppContent(state, vm, ::enablePush, { pickFile.launch("*/*") }, ::saveFile, ::withMic, ::withCamera)
                 } else {
                     LockScreen(noLockSet = !lockAvailable, failed = unlockFailed, onUnlock = ::promptUnlock)
                 }

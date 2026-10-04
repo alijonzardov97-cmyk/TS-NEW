@@ -26,6 +26,16 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.webrtc.AudioSource
+import org.webrtc.Camera2Enumerator
+import org.webrtc.CameraVideoCapturer
+import org.webrtc.DefaultVideoDecoderFactory
+import org.webrtc.DefaultVideoEncoderFactory
+import org.webrtc.EglBase
+import org.webrtc.RtpTransceiver
+import org.webrtc.SurfaceTextureHelper
+import org.webrtc.VideoSink
+import org.webrtc.VideoSource
+import org.webrtc.VideoTrack
 import org.webrtc.AudioTrack
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
@@ -48,7 +58,19 @@ data class CallUi(
     val muted: Boolean = false,
     val speaker: Boolean = false,
     @StringRes val notice: Int? = null,
+    /** Our camera is on (frames are sent). */
+    val cameraOn: Boolean = false,
+    val frontCamera: Boolean = true,
+    /** The other side's video track, and whether frames are actually arriving. */
+    val remoteTrack: VideoTrack? = null,
+    val remoteLive: Boolean = false,
+    val localTrack: VideoTrack? = null,
 )
+
+/** Shared EGL context for video rendering and hardware codecs. */
+object CallVideo {
+    val egl: EglBase by lazy { EglBase.create() }
+}
 
 /**
  * One-to-one audio call over WebRTC (DTLS-SRTP), signalled through the server's voice channel in
@@ -83,6 +105,14 @@ class CallManager(
     private var pc: PeerConnection? = null
     private var source: AudioSource? = null
     private var track: AudioTrack? = null
+    private var videoSource: VideoSource? = null
+    private var videoTrack: VideoTrack? = null
+    private var capturer: CameraVideoCapturer? = null
+    private var captureHelper: SurfaceTextureHelper? = null
+    private var remoteTrack: VideoTrack? = null
+    private var probeJob: Job? = null
+    @Volatile private var lastRemoteFrame = 0L
+    private val remoteProbe = VideoSink { lastRemoteFrame = android.os.SystemClock.elapsedRealtime() }
     private val pendingIce = ArrayList<IceCandidate>()
     private var timeout: Job? = null
     private var lastVoiceOp = 0L
@@ -139,6 +169,50 @@ class CallManager(
         val s = !_ui.value.speaker
         audio.isSpeakerphoneOn = s
         _ui.value = _ui.value.copy(speaker = s)
+    }
+
+    /**
+     * Turns our camera on or off. The video line is negotiated with the call from the start but
+     * carries nothing until the camera runs, so no renegotiation is needed. The camera permission
+     * is obtained by the caller first.
+     */
+    fun toggleCamera() {
+        if (phase !in ACTIVE_PHASES) return
+        if (_ui.value.cameraOn) stopCamera(true) else startCamera()
+    }
+
+    fun switchCamera() {
+        capturer?.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
+            override fun onCameraSwitchDone(front: Boolean) { scope.launch { _ui.value = _ui.value.copy(frontCamera = front) } }
+            override fun onCameraSwitchError(error: String?) {}
+        })
+    }
+
+    private fun startCamera() {
+        val vs = videoSource ?: return
+        if (capturer != null) return
+        try {
+            val en = Camera2Enumerator(context)
+            val name = en.deviceNames.firstOrNull { en.isFrontFacing(it) } ?: en.deviceNames.firstOrNull() ?: return
+            val cap = en.createCapturer(name, null) ?: return
+            val helper = SurfaceTextureHelper.create("ts-capture", CallVideo.egl.eglBaseContext)
+            cap.initialize(helper, context, vs.capturerObserver)
+            cap.startCapture(1280, 720, 24)
+            capturer = cap
+            captureHelper = helper
+            _ui.value = _ui.value.copy(cameraOn = true, frontCamera = en.isFrontFacing(name), localTrack = videoTrack)
+        } catch (_: Exception) {
+            stopCamera(false)
+        }
+    }
+
+    private fun stopCamera(updateUi: Boolean) {
+        runCatching { capturer?.stopCapture() }
+        runCatching { capturer?.dispose() }
+        runCatching { captureHelper?.dispose() }
+        capturer = null
+        captureHelper = null
+        if (updateUi) _ui.value = _ui.value.copy(cameraOn = false, localTrack = null)
     }
 
     /** A push told us somebody is calling; show the incoming screen if we are free. */
@@ -221,6 +295,18 @@ class CallManager(
             val src = f.createAudioSource(MediaConstraints())
             source = src
             track = f.createAudioTrack("audio0", src).also { it.setEnabled(true) }
+            val vs = f.createVideoSource(false)
+            videoSource = vs
+            videoTrack = f.createVideoTrack("video0", vs).also { it.setEnabled(true) }
+            lastRemoteFrame = 0L
+            probeJob?.cancel()
+            probeJob = scope.launch {
+                while (true) {
+                    delay(1_000)
+                    val live = lastRemoteFrame != 0L && android.os.SystemClock.elapsedRealtime() - lastRemoteFrame < 2_500
+                    if (live != _ui.value.remoteLive) _ui.value = _ui.value.copy(remoteLive = live)
+                }
+            }
             savedMode = audio.mode
             audio.mode = AudioManager.MODE_IN_COMMUNICATION
             audio.isSpeakerphoneOn = false
@@ -248,6 +334,7 @@ class CallManager(
         }
         val p = factory(context).createPeerConnection(cfg, observer) ?: return null
         track?.let { p.addTrack(it, listOf("ts-stream")) }
+        videoTrack?.let { p.addTrack(it, listOf("ts-stream")) }
         pc = p
         return p
     }
@@ -363,6 +450,15 @@ class CallManager(
         override fun onRemoveStream(s: MediaStream?) {}
         override fun onDataChannel(d: org.webrtc.DataChannel?) {}
         override fun onRenegotiationNeeded() {}
+        override fun onTrack(transceiver: RtpTransceiver?) {
+            val t = transceiver?.receiver?.track() as? VideoTrack ?: return
+            scope.launch {
+                if (pc == null) return@launch
+                remoteTrack = t
+                t.addSink(remoteProbe)
+                _ui.value = _ui.value.copy(remoteTrack = t)
+            }
+        }
     }
 
     // ── Helpers ──
@@ -438,11 +534,19 @@ class CallManager(
         timeout?.cancel()
         val ch = _ui.value.channelId
         if (leave && ch.isNotEmpty()) sendVoice("leave_voice", ch)
+        probeJob?.cancel()
+        probeJob = null
+        stopCamera(false)
+        runCatching { remoteTrack?.removeSink(remoteProbe) }
+        remoteTrack = null
         runCatching { pc?.close(); pc?.dispose() }
         pc = null
         runCatching { track?.dispose(); source?.dispose() }
+        runCatching { videoTrack?.dispose(); videoSource?.dispose() }
         track = null
         source = null
+        videoTrack = null
+        videoSource = null
         pendingIce.clear()
         remoteSet = false
         offerSent = false
@@ -485,7 +589,10 @@ class CallManager(
                 PeerConnectionFactory.initialize(
                     PeerConnectionFactory.InitializationOptions.builder(context.applicationContext).createInitializationOptions(),
                 )
-                return PeerConnectionFactory.builder().createPeerConnectionFactory().also { factory = it }
+                return PeerConnectionFactory.builder()
+                    .setVideoEncoderFactory(DefaultVideoEncoderFactory(CallVideo.egl.eglBaseContext, true, true))
+                    .setVideoDecoderFactory(DefaultVideoDecoderFactory(CallVideo.egl.eglBaseContext))
+                    .createPeerConnectionFactory().also { factory = it }
             }
         }
     }

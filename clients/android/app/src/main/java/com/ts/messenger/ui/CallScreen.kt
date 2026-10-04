@@ -19,6 +19,12 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.viewinterop.AndroidView
+import org.webrtc.RendererCommon
+import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoTrack
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,10 +53,17 @@ fun CallScreen(
     onHangup: () -> Unit,
     onMute: () -> Unit,
     onSpeaker: () -> Unit,
+    onCamera: () -> Unit,
+    onFlip: () -> Unit,
 ) {
+    val remoteVideo = call.remoteLive && call.remoteTrack != null
     Box(
         modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CallBgTop, CallBgBottom))),
     ) {
+        if (remoteVideo) {
+            VideoView(call.remoteTrack, mirror = false, overlay = false, modifier = Modifier.fillMaxSize())
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.22f)))
+        }
         Column(
             modifier = Modifier.safeDrawingPadding().padding(24.dp).fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -58,8 +71,10 @@ fun CallScreen(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Spacer(Modifier.height(40.dp))
-                Avatar(call.peerName, call.peerName, size = 120.dp)
-                Spacer(Modifier.height(6.dp))
+                if (!remoteVideo) {
+                    Avatar(call.peerName, call.peerName, size = 120.dp)
+                    Spacer(Modifier.height(6.dp))
+                }
                 Text(
                     call.peerName,
                     style = MaterialTheme.typography.headlineMedium,
@@ -81,7 +96,15 @@ fun CallScreen(
                 )
             }
 
-            if (call.sas != null && call.phase != CallPhase.Ringing) {
+            if (call.sas != null && call.phase != CallPhase.Ringing && remoteVideo) {
+                Text(
+                    stringResource(R.string.call_code_title) + ": " + call.sas,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White.copy(alpha = 0.85f),
+                    textAlign = TextAlign.Center,
+                )
+            } else if (call.sas != null && call.phase != CallPhase.Ringing) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -115,6 +138,13 @@ fun CallScreen(
                         if (call.muted) CallBgBottom else Color.White,
                         onMute,
                     )
+                    RoundAction(
+                        if (call.cameraOn) IconKind.Video else IconKind.VideoOff,
+                        stringResource(if (call.cameraOn) R.string.call_camera_off else R.string.call_camera_on),
+                        if (call.cameraOn) Color.White else Color.White.copy(alpha = 0.16f),
+                        if (call.cameraOn) CallBgBottom else Color.White,
+                        onCamera,
+                    )
                     RoundAction(IconKind.Phone, stringResource(R.string.call_hangup), Red, Color.White, onHangup, rotation = 135f)
                     RoundAction(
                         IconKind.Speaker,
@@ -126,7 +156,35 @@ fun CallScreen(
                 }
             }
         }
+        if (call.cameraOn && call.localTrack != null) {
+            Box(
+                modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(16.dp)
+                    .size(width = 108.dp, height = 144.dp).clip(RoundedCornerShape(14.dp)).clickable(onClick = onFlip),
+            ) {
+                VideoView(call.localTrack, mirror = call.frontCamera, overlay = true, modifier = Modifier.fillMaxSize())
+            }
+        }
     }
+}
+
+/** A WebRTC video surface that attaches to [track] while it is on screen. */
+@Composable
+private fun VideoView(track: VideoTrack?, mirror: Boolean, overlay: Boolean, modifier: Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val view = remember {
+        SurfaceViewRenderer(ctx).apply {
+            init(com.ts.messenger.call.CallVideo.egl.eglBaseContext, null)
+            setEnableHardwareScaler(true)
+            setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+            setZOrderMediaOverlay(overlay)
+        }
+    }
+    DisposableEffect(track, view) {
+        track?.addSink(view)
+        onDispose { runCatching { track?.removeSink(view) } }
+    }
+    DisposableEffect(view) { onDispose { runCatching { view.release() } } }
+    AndroidView(factory = { view }, modifier = modifier, update = { it.setMirror(mirror) })
 }
 
 @Composable
