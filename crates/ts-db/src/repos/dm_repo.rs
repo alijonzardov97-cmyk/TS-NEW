@@ -140,16 +140,30 @@ pub async fn list_user_dms(
     Ok(results)
 }
 
-/// IDs of everyone this user has a direct-message pair with.
+/// IDs of everyone this user is a real conversation partner of.
+///
+/// A bare `dm_pairs` row is not enough: anyone can create one with any user. A partner is someone
+/// who has written in the chat AND to whom this user has written, and nobody has blocked the other.
+/// This is what the opt-in "online" status is shared with.
 pub async fn list_dm_partner_ids(pool: &PgPool, user_id: Uuid) -> Result<Vec<Uuid>, sqlx::Error> {
-    let pairs = sqlx::query_as::<_, DmPair>(
-        "SELECT * FROM dm_pairs WHERE user_a = $1 OR user_b = $1",
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT CASE WHEN p.user_a = $1 THEN p.user_b ELSE p.user_a END
+        FROM dm_pairs p
+        WHERE (p.user_a = $1 OR p.user_b = $1)
+          AND EXISTS (
+              SELECT 1 FROM messages m
+              WHERE m.channel_id = p.channel_id AND m.sender_id = p.user_a)
+          AND EXISTS (
+              SELECT 1 FROM messages m
+              WHERE m.channel_id = p.channel_id AND m.sender_id = p.user_b)
+          AND NOT EXISTS (
+              SELECT 1 FROM user_blocks b
+              WHERE (b.blocker_id = p.user_a AND b.blocked_id = p.user_b)
+                 OR (b.blocker_id = p.user_b AND b.blocked_id = p.user_a))
+        "#,
     )
     .bind(user_id)
     .fetch_all(pool)
-    .await?;
-    Ok(pairs
-        .into_iter()
-        .map(|p| if p.user_a == user_id { p.user_b } else { p.user_a })
-        .collect())
+    .await
 }
