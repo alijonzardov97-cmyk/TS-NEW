@@ -125,6 +125,10 @@ class MainActivity : FragmentActivity() {
             TsTheme {
                 val state by vm.state.collectAsState()
                 val lockAvailable = remember { AppLock.isAvailable(this) }
+                // Shield reveal right after a successful unlock.
+                var reveal by remember { mutableStateOf(false) }
+                androidx.compose.runtime.LaunchedEffect(state.unlocked) { if (state.unlocked) reveal = true }
+                androidx.compose.foundation.layout.Box {
                 androidx.compose.animation.Crossfade(
                     targetState = state.unlocked,
                     animationSpec = androidx.compose.animation.core.tween(380),
@@ -135,6 +139,8 @@ class MainActivity : FragmentActivity() {
                     } else {
                         LockScreen(noLockSet = !lockAvailable, failed = unlockFailed, onUnlock = ::promptUnlock)
                     }
+                }
+                if (reveal && state.unlocked) com.ts.messenger.ui.UnlockReveal { reveal = false }
                 }
             }
         }

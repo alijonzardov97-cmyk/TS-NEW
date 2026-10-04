@@ -1,6 +1,7 @@
 package com.ts.messenger.ui
 
 import androidx.compose.foundation.background
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.remember
@@ -280,5 +281,49 @@ fun SecurityChip(text: String) {
         TsIcon(IconKind.Lock, colors.primary, 16.dp)
         Spacer(Modifier.size(6.dp))
         Text(text, style = MaterialTheme.typography.labelLarge, color = colors.primary)
+    }
+}
+
+
+/**
+ * Brief full-screen shield shown right after a successful unlock: the shield pops in, a ring
+ * expands from it, then the whole layer fades away revealing the chats. [onDone] fires at the end.
+ */
+@Composable
+fun UnlockReveal(onDone: () -> Unit) {
+    val pop = remember { androidx.compose.animation.core.Animatable(0f) }
+    val ring = remember { androidx.compose.animation.core.Animatable(0f) }
+    val fade = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.coroutineScope {
+            launch { pop.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 260f)) }
+            launch { ring.animateTo(1f, androidx.compose.animation.core.tween(700, easing = androidx.compose.animation.core.FastOutSlowInEasing)) }
+            launch {
+                kotlinx.coroutines.delay(520)
+                fade.animateTo(0f, androidx.compose.animation.core.tween(280))
+            }
+        }
+        onDone()
+    }
+    Box(
+        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = fade.value }.background(Color(0xFF0E1114)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size((96 + 220 * ring.value).dp)
+                .clip(CircleShape)
+                .background(Color(0xFF2DD4A7).copy(alpha = 0.28f * (1f - ring.value))),
+        )
+        Box(
+            modifier = Modifier
+                .size(96.dp)
+                .graphicsLayer { scaleX = 0.5f + 0.5f * pop.value; scaleY = 0.5f + 0.5f * pop.value }
+                .clip(CircleShape)
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF1C2A2A), Color(0xFF0B1112)))),
+            contentAlignment = Alignment.Center,
+        ) {
+            TsIcon(IconKind.ShieldLock, Color(0xFF2DD4A7), 52.dp)
+        }
     }
 }
