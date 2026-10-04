@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TS — варианты значка</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, Inter, sans-serif; background: #e9eaec; color: #222; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; text-align: center; margin-bottom: 4px; }
+  .sub { text-align: center; color: #666; font-size: 13px; margin-bottom: 22px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; max-width: 1100px; margin: 0 auto; }
+  .card { background: #fff; border-radius: 20px; padding: 18px; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+  .card h2 { font-size: 16px; margin-bottom: 2px; }
+  .card p { font-size: 12.5px; color: #666; margin-bottom: 14px; line-height: 1.35; }
+  .big { display: flex; justify-content: center; margin-bottom: 14px; }
+  .icon { width: 132px; height: 132px; border-radius: 30px; overflow: hidden; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+  .icon svg { width: 100%; height: 100%; display: block; }
+  .home { display: flex; gap: 14px; justify-content: center; padding: 14px; border-radius: 16px; align-items: flex-end; }
+  .home.dark { background: linear-gradient(160deg, #20262d, #0d1013); }
+  .home.light { background: linear-gradient(160deg, #cfd9e6, #f1f4f8); margin-top: 10px; }
+  .app { text-align: center; font-size: 10px; }
+  .home.dark .app { color: #e6edf3; } .home.light .app { color: #222; }
+  .app .icon { width: 54px; height: 54px; border-radius: 14px; box-shadow: 0 3px 8px rgba(0,0,0,.35); margin-bottom: 4px; }
+  .app .icon.round { border-radius: 50%; }
+  .dummy { width: 54px; height: 54px; border-radius: 14px; background: rgba(128,128,128,.35); margin: 0 auto 4px; }
+  .tiny { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 10px; font-size: 11px; color: #666; }
+  .tiny .icon { width: 28px; height: 28px; border-radius: 7px; box-shadow: none; }
+</style>
+</head>
+<body>
+<h1>Значок TS — четыре варианта</h1>
+<p class="sub">Все в стиле «Сейф»: графит и сине-зелёный. Показаны крупно, на экране телефона (тёмный и светлый фон) и в мелком размере.</p>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <linearGradient id="bgA" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16201f"/><stop offset="1" stop-color="#0a0e10"/></linearGradient>
+  <linearGradient id="bgB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b2a2a"/><stop offset="1" stop-color="#0b1112"/></linearGradient>
+  <linearGradient id="bgC" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4a7"/><stop offset="1" stop-color="#127a63"/></linearGradient>
+  <linearGradient id="bgD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1c2a3a"/><stop offset="1" stop-color="#0a1016"/></linearGradient>
+  <linearGradient id="gl" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6df0cd"/><stop offset="1" stop-color="#1fa886"/></linearGradient>
+  <radialGradient id="halo" cx="50%" cy="42%" r="55%"><stop offset="0" stop-color="#2dd4a7" stop-opacity=".28"/><stop offset="1" stop-color="#2dd4a7" stop-opacity="0"/></radialGradient>
+  <path id="shield" d="M54 14 L86 27 L86 54 C86 74 71 86 54 94 C37 86 22 74 22 54 L22 27 Z"/>
+  <symbol id="iconA" viewBox="0 0 108 108">
+    <rect width="108" height="108" fill="url(#bgA)"/><rect width="108" height="108" fill="url(#halo)"/>
+    <use href="#shield" fill="none" stroke="url(#gl)" stroke-width="4.5" stroke-linejoin="round"/>
+    <circle cx="54" cy="49" r="7" fill="url(#gl)"/><path d="M51 53 L57 53 L58.5 67 L49.5 67 Z" fill="url(#gl)"/>
+  </symbol>
+  <symbol id="iconB" viewBox="0 0 108 108">
+    <rect width="108" height="108" fill="url(#bgB)"/>
+    <use href="#shield" fill="#0f1a1a" stroke="url(#gl)" stroke-width="4" stroke-linejoin="round"/>
+    <text x="54" y="63" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace" font-weight="700" font-size="28" fill="url(#gl)" letter-spacing="1">TS</text>
+  </symbol>
+  <symbol id="iconC" viewBox="0 0 108 108">
+    <rect width="108" height="108" fill="url(#bgC)"/>
+    <use href="#shield" fill="#06231b"/>
+    <path d="M38 55 L50 67 L72 43" fill="none" stroke="#6df0cd" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="iconD" viewBox="0 0 108 108">
+    <rect width="108" height="108" fill="url(#bgD)"/><rect width="108" height="108" fill="url(#halo)"/>
+    <path d="M54 14 L86 27 L86 54 C86 74 71 86 54 94 Z" fill="url(#gl)" opacity=".95"/>
+    <path d="M54 14 L22 27 L22 54 C22 74 37 86 54 94 Z" fill="none" stroke="url(#gl)" stroke-width="4" stroke-linejoin="round"/>
+    <rect x="44" y="47" width="20" height="16" rx="3.5" fill="#0a1016"/>
+    <path d="M48 47 L48 42 A6 6 0 0 1 60 42 L60 47" fill="none" stroke="#0a1016" stroke-width="3.5" stroke-linecap="round"/>
+  </symbol>
+</defs></svg>
+
+<div class="grid">
+  <div class="card">
+    <h2>A · Щит и замок</h2>
+    <p>Тонкая линия щита с замочной скважиной. Самый «строгий», близок к экранам приложения.</p>
+    <div class="big"><div class="icon"><svg><use href="#iconA"/></svg></div></div>
+    <div class="home dark"><div class="app"><div class="dummy"></div>Почта</div><div class="app"><div class="icon"><svg><use href="#iconA"/></svg></div>TS</div><div class="app"><div class="dummy"></div>Карты</div></div>
+    <div class="home light"><div class="app"><div class="dummy"></div>Почта</div><div class="app"><div class="icon round"><svg><use href="#iconA"/></svg></div>TS</div><div class="app"><div class="dummy"></div>Карты</div></div>
+    <div class="tiny"><div class="icon"><svg><use href="#iconA"/></svg></div>в мелком размере</div>
+  </div>
+  <div class="card">
+    <h2>B · Щит с буквами TS</h2>
+    <p>Фирменное имя прямо на значке, моноширинный шрифт «технического» характера.</p>
+    <div class="big"><div class="icon"><svg><use href="#iconB"/></svg></div></div>
+    <div class="home dark"><div class="app"><div class="dummy"></div>Почта</div><div class="app"><div class="icon"><svg><use href="#iconB"/></svg></div>TS</div><div class="app"><div class="dummy"></div>Карты</div></div>
+    <div class="home light"><div class="app"><div class="dummy"></div>Почта</div><div class="app"><div class="icon round"><svg><use href="#iconB"/></svg></div>TS</div><div class="app"><div class="dummy"></div>Карты</div></div>
+    <div class="tiny"><div class="icon"><svg><use href="#iconB"/></svg></div>в мелком размере</div>
+  </div>
+  <div class="card">
+    <h2>C · Яркий, с галочкой</h2>
+    <p>Зелёная заливка, тёмный щит и галочка «проверено». Ярче всех на экране, лучше заметен среди других значков.</p>
+    <div class="big"><div class="icon"><svg><use href="#iconC"/></svg></div></div>
+    <div class="home dark"><div class="app"><div class="dummy"></div>Почта</div><div class="app"><div class="icon"><svg><use href="#iconC"/></svg></div>TS</div><div class="app"><div class="dummy"></div>Карты</div></div>
+    <div class="home light"><div class="app"><div class="dummy"></div>Почта</div><div class="app"><div class="icon round"><svg><use href="#iconC"/></svg></div>TS</div><div class="app"><div class="dummy"></div>Карты</div></div>
+    <div class="tiny"><div class="icon"><svg><use href="#iconC"/></svg></div>в мелком размере</div>
+  </div>
+  <div class="card">
+    <h2>D · Щит из двух половин</h2>
+    <p>Левая половина — контур, правая — заливка, посередине замок. Намёк на «двое и общий ключ».</p>
+    <div class="big"><div class="icon"><svg><use href="#iconD"/></svg></div></div>
+    <div class="home dark"><div class="app"><div class="dummy"></div>Почта</div><div class="app"><div class="icon"><svg><use href="#iconD"/></svg></div>TS</div><div class="app"><div class="dummy"></div>Карты</div></div>
+    <div class="home light"><div class="app"><div class="dummy"></div>Почта</div><div class="app"><div class="icon round"><svg><use href="#iconD"/></svg></div>TS</div><div class="app"><div class="dummy"></div>Карты</div></div>
+    <div class="tiny"><div class="icon"><svg><use href="#iconD"/></svg></div>в мелком размере</div>
+  </div>
+</div>
+</body>
+</html>
