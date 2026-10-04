@@ -66,6 +66,8 @@ class CallManager(
     private val scope: CoroutineScope,
     private val socket: ChatSocket,
     private val myId: String,
+    /** STUN/TURN servers from the server config; empty means direct (host) candidates only. */
+    private val iceServers: () -> List<PeerConnection.IceServer> = { emptyList() },
     /** Channel id -> (peer user id, display name) for a known 1:1 conversation. */
     private val peerOf: (String) -> Pair<String, String>?,
 ) {
@@ -238,7 +240,7 @@ class CallManager(
 
     private fun ensurePc(): PeerConnection? {
         pc?.let { return it }
-        val cfg = PeerConnection.RTCConfiguration(emptyList()).apply {
+        val cfg = PeerConnection.RTCConfiguration(iceServers()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
             rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE

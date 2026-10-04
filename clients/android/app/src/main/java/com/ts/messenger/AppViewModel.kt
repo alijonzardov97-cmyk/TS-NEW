@@ -380,6 +380,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(notice = R.string.notice_new_keys) }
     }
 
+    @Volatile private var iceCfg: List<org.webrtc.PeerConnection.IceServer> = emptyList()
+
+    private fun loadIceServers(a: TsApi) {
+        viewModelScope.launch {
+            runCatching { a.iceServers() }.getOrNull()?.let { list ->
+                iceCfg = list.map { s ->
+                    val b = org.webrtc.PeerConnection.IceServer.builder(s.urls)
+                    if (s.username != null && s.credential != null) b.setUsername(s.username).setPassword(s.credential)
+                    b.createIceServer()
+                }
+            }
+        }
+    }
+
     private fun startChat() {
         val a = api ?: return
         val url = baseUrl ?: return
@@ -393,7 +407,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val fs = FileService(getApplication<Application>(), a)
         fileSvc = fs
         val r = ChatRepository(a, ChatCrypto(store, keyVault), chatLog, sock, me.id, fs)
-        val cm = CallManager(getApplication<Application>(), viewModelScope, sock, me.id) { ch ->
+        val cm = CallManager(getApplication<Application>(), viewModelScope, sock, me.id, iceServers = { iceCfg }) { ch ->
             _state.value.dms.firstOrNull { it.channel.id == ch }?.let { it.otherUser.id to it.otherUser.displayName }
         }
         calls = cm
@@ -434,6 +448,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             launch { r.identityAlerts.collect { al -> _state.update { it.copy(identityAlert = al) } } }
         }
         sock.start()
+        loadIceServers(a)
         refreshDms()
         syncPush()
         val on = bgEnabled()

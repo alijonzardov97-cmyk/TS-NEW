@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import okhttp3.CertificatePinner
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -87,6 +89,30 @@ class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
     suspend fun health(): HealthResponse =
         call(Request.Builder().url(url("/health")).get().build()) {
             AppJson.decodeFromString(it)
+        }
+
+    /**
+     * STUN/TURN servers the admin configured, from the signed-in config. Only stun:/turn:/turns:
+     * addresses are accepted; the credentials are for the relay only, and media stays DTLS-SRTP
+     * encrypted between the two phones.
+     */
+    suspend fun iceServers(): List<IceServerCfg> =
+        authed({ bearer(url("/account/config"), it).get().build() }) { body ->
+            val arr = AppJson.parseToJsonElement(body).jsonObject["ice_servers"] as? kotlinx.serialization.json.JsonArray
+                ?: return@authed emptyList()
+            arr.take(4).mapNotNull { el ->
+                val o = el as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                val u = o["urls"]
+                val urls = when (u) {
+                    is kotlinx.serialization.json.JsonArray -> u.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+                    is kotlinx.serialization.json.JsonPrimitive -> listOfNotNull(u.contentOrNull)
+                    else -> emptyList()
+                }.filter { it.length < 200 && it.none(Char::isWhitespace) && (it.startsWith("stun:") || it.startsWith("turn:") || it.startsWith("turns:")) }
+                if (urls.isEmpty()) null else IceServerCfg(
+                    urls, (o["username"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull,
+                    (o["credential"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull,
+                )
+            }
         }
 
     suspend fun config(): ServerConfig =
@@ -287,3 +313,6 @@ class TsApi(private val baseUrl: HttpUrl, private val client: OkHttpClient) {
         }
     }
 }
+
+
+data class IceServerCfg(val urls: List<String>, val username: String?, val credential: String?)
