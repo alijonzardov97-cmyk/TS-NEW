@@ -125,10 +125,16 @@ class MainActivity : FragmentActivity() {
             TsTheme {
                 val state by vm.state.collectAsState()
                 val lockAvailable = remember { AppLock.isAvailable(this) }
-                if (state.unlocked) {
-                    AppContent(state, vm, ::enablePush, { pickFile.launch("*/*") }, ::saveFile, ::withMic, ::withCamera, { pickAvatar.launch("image/*") })
-                } else {
-                    LockScreen(noLockSet = !lockAvailable, failed = unlockFailed, onUnlock = ::promptUnlock)
+                androidx.compose.animation.Crossfade(
+                    targetState = state.unlocked,
+                    animationSpec = androidx.compose.animation.core.tween(380),
+                    label = "unlock",
+                ) { open ->
+                    if (open) {
+                        AppContent(state, vm, ::enablePush, { pickFile.launch("*/*") }, ::saveFile, ::withMic, ::withCamera, { pickAvatar.launch("image/*") })
+                    } else {
+                        LockScreen(noLockSet = !lockAvailable, failed = unlockFailed, onUnlock = ::promptUnlock)
+                    }
                 }
             }
         }

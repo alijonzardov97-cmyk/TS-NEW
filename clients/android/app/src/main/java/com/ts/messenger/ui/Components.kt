@@ -1,6 +1,9 @@
 package com.ts.messenger.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,13 +70,37 @@ fun Page(title: String, content: @Composable () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Spacer(Modifier.height(16.dp))
-            Box(
-                modifier = Modifier.size(96.dp).clip(CircleShape).background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF1C2A2A), Color(0xFF0B1112))),
+            // Shield: springs in on appearance, with a slow teal halo pulsing behind it.
+            val appear = remember { androidx.compose.animation.core.Animatable(0f) }
+            LaunchedEffect(Unit) {
+                appear.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.55f, stiffness = 180f))
+            }
+            val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "halo")
+            val halo by pulse.animateFloat(
+                initialValue = 0f, targetValue = 1f,
+                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                    androidx.compose.animation.core.tween(2200, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                    androidx.compose.animation.core.RepeatMode.Restart,
                 ),
-                contentAlignment = Alignment.Center,
-            ) {
-                TsIcon(IconKind.ShieldLock, Color(0xFF2DD4A7), 52.dp)
+                label = "halo",
+            )
+            Box(modifier = Modifier.size(132.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size((96 + 36 * halo).dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF2DD4A7).copy(alpha = 0.22f * (1f - halo))),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .graphicsLayer { scaleX = 0.6f + 0.4f * appear.value; scaleY = 0.6f + 0.4f * appear.value; alpha = appear.value.coerceIn(0f, 1f) }
+                        .clip(CircleShape)
+                        .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF1C2A2A), Color(0xFF0B1112)))),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    TsIcon(IconKind.ShieldLock, Color(0xFF2DD4A7), 52.dp)
+                }
             }
             Text("TS", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Text(
