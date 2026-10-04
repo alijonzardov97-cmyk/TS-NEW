@@ -1,7 +1,6 @@
 package com.ts.messenger.ui
 
 import android.app.Activity
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -12,23 +11,23 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// Calm, strict messenger palette: one blue accent, neutral surfaces.
+// "Safe" palette: graphite surfaces, one teal accent. The app is always dark.
 // background = chat wallpaper, surface = bars and lists,
 // primaryContainer = outgoing bubble, surface = incoming bubble.
 private val Dark = darkColorScheme(
-    primary = Color(0xFF2F86E0),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFF2B5278),
-    onPrimaryContainer = Color(0xFFF2F6FA),
-    background = Color(0xFF0E1621),
-    onBackground = Color(0xFFF2F6FA),
-    surface = Color(0xFF17212B),
-    onSurface = Color(0xFFF2F6FA),
-    surfaceVariant = Color(0xFF1F2B38),
-    onSurfaceVariant = Color(0xFF8B9BA8),
+    primary = Color(0xFF2DD4A7),
+    onPrimary = Color(0xFF06231B),
+    primaryContainer = Color(0xFF12382F),
+    onPrimaryContainer = Color(0xFFE6EDF3),
+    background = Color(0xFF0E1114),
+    onBackground = Color(0xFFE6EDF3),
+    surface = Color(0xFF12161A),
+    onSurface = Color(0xFFE6EDF3),
+    surfaceVariant = Color(0xFF1A2026),
+    onSurfaceVariant = Color(0xFF8794A2),
     outline = Color(0xFF55626E),
-    outlineVariant = Color(0xFF223040),
-    error = Color(0xFFEC5B5B),
+    outlineVariant = Color(0xFF1F262D),
+    error = Color(0xFFEF5B5B),
 )
 
 private val Light = lightColorScheme(
@@ -49,7 +48,7 @@ private val Light = lightColorScheme(
 
 @Composable
 fun TsTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+    val dark = true
     val scheme = if (dark) Dark else Light
     val view = LocalView.current
     if (!view.isInEditMode) {

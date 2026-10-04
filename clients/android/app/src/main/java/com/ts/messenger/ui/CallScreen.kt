@@ -40,10 +40,10 @@ import com.ts.messenger.R
 import com.ts.messenger.call.CallPhase
 import com.ts.messenger.call.CallUi
 
-private val CallBgTop = Color(0xFF1F3550)
-private val CallBgBottom = Color(0xFF0B121A)
-private val Green = Color(0xFF34C759)
-private val Red = Color(0xFFEB4D4B)
+private val CallBgTop = Color(0xFF16231F)
+private val CallBgBottom = Color(0xFF0A0E10)
+private val Green = Color(0xFF2DD4A7)
+private val Red = Color(0xFFEF5B5B)
 
 @Composable
 fun CallScreen(

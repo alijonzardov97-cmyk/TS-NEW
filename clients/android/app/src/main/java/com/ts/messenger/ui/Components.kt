@@ -69,11 +69,11 @@ fun Page(title: String, content: @Composable () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Box(
                 modifier = Modifier.size(96.dp).clip(CircleShape).background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF3390EC), Color(0xFF1B5FA8))),
+                    androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF1C2A2A), Color(0xFF0B1112))),
                 ),
                 contentAlignment = Alignment.Center,
             ) {
-                TsIcon(IconKind.ShieldLock, Color.White, 52.dp)
+                TsIcon(IconKind.ShieldLock, Color(0xFF2DD4A7), 52.dp)
             }
             Text("TS", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Text(
@@ -189,8 +189,8 @@ fun ButtonRow(content: @Composable () -> Unit) {
 // ── Messenger building blocks ──
 
 private val AvatarPalette = listOf(
-    Color(0xFFE17076), Color(0xFFEDA86C), Color(0xFFA695E7), Color(0xFF7BC862),
-    Color(0xFF6EC9CB), Color(0xFF65AADD), Color(0xFFEE7AAE),
+    Color(0xFF3F6F8F), Color(0xFF3F8F7A), Color(0xFF6B6FA8), Color(0xFF8F6F3F),
+    Color(0xFF8F4F5F), Color(0xFF4F7F4F), Color(0xFF5F6F7F),
 )
 
 /** Round avatar with the first letter; the colour is stable per [seed]. */

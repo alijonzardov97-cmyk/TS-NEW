@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -329,9 +330,9 @@ fun ChatScreen(
                     Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val (trustColor, trustText) = when (state.trust) {
-                            com.ts.messenger.Trust.Verified -> Color(0xFF1FA886) to R.string.trust_verified
-                            com.ts.messenger.Trust.Changed -> Color(0xFFE5484D) to R.string.trust_changed
-                            com.ts.messenger.Trust.Unverified -> Color(0xFFD99A1E) to R.string.trust_unverified
+                            com.ts.messenger.Trust.Verified -> Color(0xFF2DD4A7) to R.string.trust_verified
+                            com.ts.messenger.Trust.Changed -> Color(0xFFEF5B5B) to R.string.trust_changed
+                            com.ts.messenger.Trust.Unverified -> Color(0xFFF5B84A) to R.string.trust_unverified
                         }
                         TsIcon(if (state.trust == com.ts.messenger.Trust.Verified) IconKind.ShieldLock else IconKind.Lock, trustColor, 13.dp)
                         Spacer(Modifier.width(4.dp))
@@ -341,6 +342,16 @@ fun ChatScreen(
                 IconBtn(IconKind.Shield, colors.onSurfaceVariant, onClick = onSafety)
                 IconBtn(IconKind.Phone, colors.primary, enabled = state.connected, onClick = onCall)
             }
+            // Thin line under the header: green = keys verified, amber = not yet, red = changed.
+            androidx.compose.foundation.layout.Box(
+                Modifier.fillMaxWidth().height(2.dp).background(
+                    when (state.trust) {
+                        com.ts.messenger.Trust.Verified -> Color(0xFF2DD4A7)
+                        com.ts.messenger.Trust.Changed -> Color(0xFFEF5B5B)
+                        com.ts.messenger.Trust.Unverified -> Color(0xFFF5B84A)
+                    },
+                ),
+            )
             if (!state.connected) {
                 Text(
                     stringResource(R.string.offline_banner),
