@@ -87,6 +87,8 @@ data class UiState(
     val background: Boolean = true,
     /** True while the signed-in user is moving the app to another server address. */
     val movingServer: Boolean = false,
+    /** Whether the open chat's peer key was compared with the person (and still matches). */
+    val trust: Trust = Trust.Unverified,
     /** Channels whose newest incoming message has not been seen yet (shown as a dot). */
     val unread: Set<String> = emptySet(),
     /** Channel id -> time of its newest message; the list shows the most recent chat on top. */
@@ -95,6 +97,8 @@ data class UiState(
     val call: CallUi = CallUi(),
     val safety: SafetyInfo? = null,
 )
+
+enum class Trust { Unverified, Verified, Changed }
 
 /** [number] is null while the peer's identity key is not known yet (no message exchanged). */
 data class SafetyInfo(val number: String?)
@@ -435,6 +439,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     msgs.lastOrNull()?.let { last -> _state.update { it.copy(lastActivity = it.lastActivity + (ch to last.createdAt)) } }
                     if (_state.value.current?.channel?.id == ch) {
                         _state.update { it.copy(messages = msgs) }
+                        updateTrust()
                         markSeen(ch)
                     } else recomputeUnread()
                 }
@@ -608,10 +613,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openChat(dm: DmChannel) {
         val r = repo ?: return
-        _state.update { it.copy(screen = Screen.Chat, current = dm, messages = r.cached(dm.channel.id), error = null) }
+        _state.update { it.copy(screen = Screen.Chat, current = dm, messages = r.cached(dm.channel.id), error = null, trust = Trust.Unverified) }
+        updateTrust()
         viewModelScope.launch {
             try {
                 r.loadHistory(dm)
+                updateTrust()
                 markSeen(dm.channel.id)
             } catch (e: CertificateChangedException) {
                 presentCertChange()
@@ -772,6 +779,45 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         else pendingCallChannel = channelId
     }
 
+    // ── Verified keys ──
+
+    private fun keyDigest(theirs: ByteArray): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(theirs).joinToString("") { "%02x".format(it) }
+
+    private fun verifiedKey(peerId: String) = "verified.$peerId".takeIf { peerId.matches(Regex("[0-9a-fA-F-]{36}")) }
+
+    /** Recomputes the trust state of [peerId]: verified, never verified, or verified before but the key changed. */
+    private fun trustOf(peerId: String): Trust {
+        val k = verifiedKey(peerId) ?: return Trust.Unverified
+        val keys = repo?.safetyKeys(peerId) ?: return Trust.Unverified
+        val theirs = keys.second
+        val now = keyDigest(theirs)
+        keys.first.fill(0); keys.second.fill(0)
+        val mark = store.getString(k) ?: return Trust.Unverified
+        return if (mark == now) Trust.Verified else Trust.Changed
+    }
+
+    private fun updateTrust() {
+        val peer = _state.value.current?.otherUser?.id ?: return
+        _state.update { it.copy(trust = trustOf(peer)) }
+    }
+
+    /** The user compared the safety number with the person and it matched. */
+    fun markVerified() {
+        val peer = _state.value.current?.otherUser?.id ?: return
+        val k = verifiedKey(peer) ?: return
+        val keys = repo?.safetyKeys(peer) ?: return
+        store.putString(k, keyDigest(keys.second))
+        keys.first.fill(0); keys.second.fill(0)
+        updateTrust()
+    }
+
+    fun unmarkVerified() {
+        val peer = _state.value.current?.otherUser?.id ?: return
+        verifiedKey(peer)?.let { store.remove(it) }
+        updateTrust()
+    }
+
     fun acceptIdentity() {
         val alert = _state.value.identityAlert ?: return
         val r = repo ?: return
@@ -779,6 +825,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             r.acceptIdentity(alert)
             _state.update { it.copy(identityAlert = null) }
             _state.value.current?.let { runCatching { r.loadHistory(it) } }
+            updateTrust()
         }
     }
 

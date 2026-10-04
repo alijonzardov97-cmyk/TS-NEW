@@ -214,7 +214,20 @@ fun AppContent(
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = vm::dismissSafety) { Text(stringResource(R.string.call_ok)) } },
+            confirmButton = {
+                if (info.number != null && state.trust != com.ts.messenger.Trust.Verified) {
+                    TextButton(onClick = { vm.markVerified(); vm.dismissSafety() }) { Text(stringResource(R.string.trust_confirm)) }
+                } else {
+                    TextButton(onClick = vm::dismissSafety) { Text(stringResource(R.string.call_ok)) }
+                }
+            },
+            dismissButton = {
+                if (info.number != null && state.trust == com.ts.messenger.Trust.Verified) {
+                    TextButton(onClick = { vm.unmarkVerified(); vm.dismissSafety() }) { Text(stringResource(R.string.trust_remove)) }
+                } else {
+                    TextButton(onClick = vm::dismissSafety) { Text(stringResource(R.string.pin_cancel)) }
+                }
+            },
         )
     }
     state.call.notice?.let { res ->

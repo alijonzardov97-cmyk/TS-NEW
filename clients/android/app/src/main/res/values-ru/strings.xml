@@ -20,6 +20,11 @@
     <string name="move_server">Сменить адрес сервера</string>
     <string name="call_camera_on">Видео</string>
     <string name="call_camera_off">Выкл. видео</string>
+    <string name="trust_verified">ключи сверены</string>
+    <string name="trust_unverified">зашифровано · ключи не сверены</string>
+    <string name="trust_changed">ключи изменились!</string>
+    <string name="trust_confirm">Совпадает, отметить</string>
+    <string name="trust_remove">Снять отметку</string>
     <string name="change_server">Сменить сервер</string>
 
     <string name="login_title">С возвращением!</string>

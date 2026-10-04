@@ -313,9 +313,14 @@ fun ChatScreen(
                 Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                     Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        TsIcon(IconKind.Lock, colors.primary, 13.dp)
+                        val (trustColor, trustText) = when (state.trust) {
+                            com.ts.messenger.Trust.Verified -> Color(0xFF1FA886) to R.string.trust_verified
+                            com.ts.messenger.Trust.Changed -> Color(0xFFE5484D) to R.string.trust_changed
+                            com.ts.messenger.Trust.Unverified -> Color(0xFFD99A1E) to R.string.trust_unverified
+                        }
+                        TsIcon(if (state.trust == com.ts.messenger.Trust.Verified) IconKind.ShieldLock else IconKind.Lock, trustColor, 13.dp)
                         Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.sec_encrypted), style = MaterialTheme.typography.bodySmall, color = colors.primary, maxLines = 1)
+                        Text(stringResource(trustText), style = MaterialTheme.typography.bodySmall, color = trustColor, maxLines = 1)
                     }
                 }
                 IconBtn(IconKind.Shield, colors.onSurfaceVariant, onClick = onSafety)

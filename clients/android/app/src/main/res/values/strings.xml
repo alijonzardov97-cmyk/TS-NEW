@@ -20,6 +20,11 @@
     <string name="move_server">Change server address</string>
     <string name="call_camera_on">Video</string>
     <string name="call_camera_off">Video off</string>
+    <string name="trust_verified">keys verified</string>
+    <string name="trust_unverified">encrypted · keys not verified</string>
+    <string name="trust_changed">keys changed!</string>
+    <string name="trust_confirm">Matches, mark verified</string>
+    <string name="trust_remove">Remove mark</string>
     <string name="change_server">Change server</string>
 
     <string name="login_title">Welcome back</string>
