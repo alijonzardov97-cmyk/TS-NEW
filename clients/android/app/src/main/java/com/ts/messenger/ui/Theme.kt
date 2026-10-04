@@ -17,16 +17,16 @@ import androidx.core.view.WindowCompat
 private val Dark = darkColorScheme(
     primary = Color(0xFF2DD4A7),
     onPrimary = Color(0xFF06231B),
-    primaryContainer = Color(0xFF12382F),
+    primaryContainer = Color(0xFF16473B),
     onPrimaryContainer = Color(0xFFE6EDF3),
-    background = Color(0xFF0E1114),
+    background = Color(0xFF1A2128),
     onBackground = Color(0xFFE6EDF3),
     surface = Color(0xFF12161A),
     onSurface = Color(0xFFE6EDF3),
-    surfaceVariant = Color(0xFF1A2026),
+    surfaceVariant = Color(0xFF26303A),
     onSurfaceVariant = Color(0xFF8794A2),
     outline = Color(0xFF55626E),
-    outlineVariant = Color(0xFF1F262D),
+    outlineVariant = Color(0xFF2A343E),
     error = Color(0xFFEF5B5B),
 )
 
